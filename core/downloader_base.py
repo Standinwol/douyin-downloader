@@ -68,6 +68,7 @@ class BaseDownloader(ABC):
             self.config, self.file_manager, self.database
         )
         self._local_aweme_ids: Optional[set[str]] = None
+        self._artifact_records: List[Dict[str, Any]] = []
         self._aweme_id_pattern = re.compile(r"(?<!\d)(\d{15,20})(?!\d)")
         self._local_media_suffixes = {
             ".mp4",
@@ -115,6 +116,10 @@ class BaseDownloader(ABC):
                 "Too many download errors, suppressing further per-file logs..."
             )
         self._download_error_log_count += 1
+
+    @property
+    def artifact_records(self) -> List[Dict[str, Any]]:
+        return list(self._artifact_records)
 
     def _download_headers(self, user_agent: Optional[str] = None) -> Dict[str, str]:
         headers = {
@@ -408,6 +413,31 @@ class BaseDownloader(ABC):
                 }
             )
 
+        if media_type == "video" and video_path is not None:
+            transcript_result = await self.transcript_manager.process_video(
+                video_path, aweme_id=aweme_id
+            )
+            transcript_status = transcript_result.get("status")
+            if transcript_status == "success":
+                for key in ("text_path", "json_path"):
+                    raw_path = transcript_result.get(key)
+                    if raw_path:
+                        transcript_path = Path(raw_path)
+                        if transcript_path.exists():
+                            downloaded_files.append(transcript_path)
+            if transcript_status == "skipped":
+                logger.info(
+                    "Transcript skipped for aweme %s: %s",
+                    aweme_id,
+                    transcript_result.get("reason", "unknown"),
+                )
+            elif transcript_status == "failed":
+                logger.warning(
+                    "Transcript failed for aweme %s: %s",
+                    aweme_id,
+                    transcript_result.get("error", "unknown"),
+                )
+
         manifest_record = {
             "date": publish_date,
             "aweme_id": aweme_id,
@@ -423,24 +453,18 @@ class BaseDownloader(ABC):
         await self.metadata_handler.append_download_manifest(
             self.file_manager.base_path, manifest_record
         )
-
-        if media_type == "video" and video_path is not None:
-            transcript_result = await self.transcript_manager.process_video(
-                video_path, aweme_id=aweme_id
-            )
-            transcript_status = transcript_result.get("status")
-            if transcript_status == "skipped":
-                logger.info(
-                    "Transcript skipped for aweme %s: %s",
-                    aweme_id,
-                    transcript_result.get("reason", "unknown"),
-                )
-            elif transcript_status == "failed":
-                logger.warning(
-                    "Transcript failed for aweme %s: %s",
-                    aweme_id,
-                    transcript_result.get("error", "unknown"),
-                )
+        self._artifact_records.append(
+            {
+                "aweme_id": str(aweme_id),
+                "author_name": author.get("nickname", author_name),
+                "desc": desc,
+                "media_type": media_type,
+                "output_dir": str(save_dir.resolve()),
+                "file_names": list(manifest_record["file_names"]),
+                "file_paths": [str(path.resolve()) for path in downloaded_files],
+                "manifest_record": manifest_record,
+            }
+        )
 
         self._mark_local_aweme_downloaded(aweme_id)
         logger.info("Downloaded %s: %s (%s)", media_type, desc, aweme_id)

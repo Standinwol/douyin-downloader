@@ -49,9 +49,11 @@ all = [
 
 [project.scripts]
 douyin-dl = "cli.main:main"
+douyin-engine-worker = "engine_api.worker:main"
+douyin-gui = "gui_app.app:main"
 
 [tool.setuptools.packages.find]
-include = ["cli*", "core*", "auth*", "config*", "control*", "storage*", "utils*", "tools*"]
+include = ["cli*", "core*", "auth*", "config*", "control*", "storage*", "utils*", "tools*", "engine_api*", "gui_app*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

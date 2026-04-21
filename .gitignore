@@ -44,3 +44,5 @@ config*.yml
 .cookies.json
 config/cookies.json
 .omx/
+.omc/
+.gui-state.json
