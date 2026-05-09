@@ -11,7 +11,10 @@ from .service import run_single_item_download_sync
 
 
 def _emit_stdout(payload: Dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    # Keep the wire format ASCII-safe so Windows codepages like cp1252
+    # cannot crash the worker when file paths or author names contain
+    # non-ASCII characters. The GUI still decodes valid JSON correctly.
+    sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
     sys.stdout.flush()
 
 
@@ -27,7 +30,7 @@ def _read_request_payload(args: argparse.Namespace) -> Dict[str, Any]:
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Stable JSON worker for single-item Douyin downloads",
+        description="Stable JSON worker for supported Douyin downloads",
     )
     parser.add_argument(
         "--request-file",

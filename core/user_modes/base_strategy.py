@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from core.downloader_base import DownloadResult
 from utils.logger import setup_logger
@@ -15,6 +15,7 @@ logger = setup_logger("UserModeStrategy")
 class BaseUserModeStrategy(ABC):
     mode_name = ""
     api_method_name = ""
+    apply_incremental_during_collection = True
 
     def __init__(self, downloader: "UserDownloader"):
         self.downloader = downloader
@@ -28,6 +29,7 @@ class BaseUserModeStrategy(ABC):
         items = await self.collect_items(sec_uid, user_info)
         items = self.apply_filters(items)
         author_name = user_info.get("nickname", "unknown")
+        incremental_scope = self._build_incremental_scope(sec_uid, user_info)
         if seen_aweme_ids is None:
             seen_aweme_ids = set()
         return await self.downloader._download_mode_items(
@@ -35,6 +37,7 @@ class BaseUserModeStrategy(ABC):
             items=items,
             author_name=author_name,
             seen_aweme_ids=seen_aweme_ids,
+            incremental_scope=incremental_scope,
         )
 
     async def collect_items(
@@ -69,10 +72,12 @@ class BaseUserModeStrategy(ABC):
             self.downloader.config.get("increase", {}).get(self.mode_name, False)
         )
         latest_time = None
-        if increase_enabled and self.downloader.database:
-            latest_time = await self.downloader.database.get_latest_aweme_time(
-                user_info.get("uid")
-            )
+        if (
+            increase_enabled
+            and self.apply_incremental_during_collection
+            and self.downloader.database
+        ):
+            latest_time = await self._get_incremental_latest_time(sec_uid, user_info)
 
         while has_more:
             await self.downloader.rate_limiter.acquire()
@@ -108,6 +113,61 @@ class BaseUserModeStrategy(ABC):
                 break
 
         return aweme_list
+
+    def _build_incremental_scope(
+        self, sec_uid: str, user_info: Dict[str, Any]
+    ) -> Optional[str]:
+        scope_id = str(user_info.get("uid") or sec_uid or "").strip()
+        if not scope_id:
+            return None
+        return f"user_mode:{self.mode_name}:{scope_id}"
+
+    async def _get_incremental_latest_time(
+        self, sec_uid: str, user_info: Dict[str, Any]
+    ) -> Optional[int]:
+        if not self.downloader.database:
+            return None
+
+        scope_key = self._build_incremental_scope(sec_uid, user_info)
+        if scope_key:
+            getter = getattr(self.downloader.database, "get_incremental_latest_time", None)
+            if callable(getter):
+                latest_time = await getter(scope_key)
+                if latest_time is not None:
+                    return latest_time
+
+        if self.mode_name == "post":
+            return await self.downloader.database.get_latest_aweme_time(
+                user_info.get("uid")
+            )
+
+        return None
+
+    async def _apply_incremental_after_expansion(
+        self,
+        items: List[Dict[str, Any]],
+        sec_uid: str,
+        user_info: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        increase_enabled = bool(
+            self.downloader.config.get("increase", {}).get(self.mode_name, False)
+        )
+        if not increase_enabled or not self.downloader.database:
+            return items
+
+        latest_time = await self._get_incremental_latest_time(sec_uid, user_info)
+        if not latest_time:
+            return items
+
+        filtered_items: List[Dict[str, Any]] = []
+        for item in items:
+            try:
+                create_time = int(item.get("create_time", 0) or 0)
+            except (TypeError, ValueError):
+                create_time = 0
+            if create_time > latest_time:
+                filtered_items.append(item)
+        return filtered_items
 
     def select_items(self, page_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         items = page_data.get("items")

@@ -6,6 +6,24 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 
+def _parse_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if not normalized:
+            return default
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
+
+
 @dataclass
 class SingleItemDownloadRequest:
     url: str
@@ -37,12 +55,12 @@ class SingleItemDownloadRequest:
             thread=int(payload.get("thread", 5) or 5),
             retry_times=int(payload.get("retry_times", 3) or 3),
             rate_limit=float(payload.get("rate_limit", 2) or 2),
-            cover=bool(payload.get("cover", True)),
-            music=bool(payload.get("music", True)),
-            avatar=bool(payload.get("avatar", True)),
-            json=bool(payload.get("json", True)),
-            folderstyle=bool(payload.get("folderstyle", True)),
-            database=bool(payload.get("database", True)),
+            cover=_parse_bool(payload.get("cover"), True),
+            music=_parse_bool(payload.get("music"), True),
+            avatar=_parse_bool(payload.get("avatar"), True),
+            json=_parse_bool(payload.get("json"), True),
+            folderstyle=_parse_bool(payload.get("folderstyle"), True),
+            database=_parse_bool(payload.get("database"), True),
             database_path=str(payload.get("database_path", "") or "").strip(),
             transcript=dict(payload.get("transcript") or {}),
         )

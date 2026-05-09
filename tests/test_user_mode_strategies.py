@@ -42,6 +42,54 @@ def test_like_strategy_collects_items_from_api():
     assert [item["aweme_id"] for item in items] == ["111"]
 
 
+def test_like_strategy_uses_mode_scoped_incremental_watermark():
+    class _Database:
+        def __init__(self):
+            self.scope_keys = []
+
+        async def get_incremental_latest_time(self, scope_key):
+            self.scope_keys.append(scope_key)
+            return 1700000000
+
+    class _API:
+        async def get_user_like(self, _sec_uid, max_cursor=0, count=20):
+            if max_cursor > 0:
+                return {"items": [], "has_more": False, "max_cursor": max_cursor}
+            return {
+                "items": [
+                    {"aweme_id": "old", "create_time": 1699999999},
+                    {"aweme_id": "new", "create_time": 1700000001},
+                ],
+                "has_more": False,
+                "max_cursor": 0,
+            }
+
+    class _Downloader:
+        def __init__(self):
+            self.api_client = _API()
+            self.rate_limiter = _NoopRateLimiter()
+            self.database = _Database()
+            self.config = type(
+                "Cfg",
+                (),
+                {
+                    "get": lambda _self, key, default=None: {
+                        "number": {"like": 0},
+                        "increase": {"like": True},
+                    }.get(key, default)
+                },
+            )()
+            self._filter_by_time = lambda items: items
+            self._limit_count = lambda items, _mode: items
+
+    downloader = _Downloader()
+    strategy = LikeUserModeStrategy(downloader)
+    items = asyncio.run(strategy.collect_items("sec_uid_x", {"uid": "uid-1"}))
+
+    assert downloader.database.scope_keys == ["user_mode:like:uid-1"]
+    assert [item["aweme_id"] for item in items] == ["new"]
+
+
 def test_post_strategy_calls_browser_recover_when_pagination_restricted():
     class _API:
         async def get_user_post(self, _sec_uid, max_cursor=0, count=20):
@@ -204,6 +252,52 @@ def test_mix_strategy_expansion_does_not_apply_number_limit_early():
     assert [item["aweme_id"] for item in items] == ["m-1", "m-2"]
 
 
+def test_mix_strategy_applies_incremental_filter_after_expansion():
+    class _Database:
+        async def get_incremental_latest_time(self, _scope_key):
+            return 1700000000
+
+    class _API:
+        async def get_user_mix(self, _sec_uid, max_cursor=0, count=20):
+            return {
+                "items": [{"mix_info": {"mix_id": "mix-1"}}],
+                "has_more": False,
+                "max_cursor": 0,
+            }
+
+        async def get_mix_aweme(self, _mix_id, cursor=0, count=20):
+            return {
+                "items": [
+                    {"aweme_id": "m-old", "create_time": 1699999999},
+                    {"aweme_id": "m-new", "create_time": 1700000001},
+                ],
+                "has_more": False,
+                "max_cursor": 0,
+            }
+
+    class _Downloader:
+        def __init__(self):
+            self.api_client = _API()
+            self.rate_limiter = _NoopRateLimiter()
+            self.database = _Database()
+            self.config = type(
+                "Cfg",
+                (),
+                {
+                    "get": lambda _self, key, default=None: {
+                        "number": {"mix": 0},
+                        "increase": {"mix": True},
+                    }.get(key, default)
+                },
+            )()
+            self._filter_by_time = lambda items: items
+            self._limit_count = lambda items, _mode: items
+
+    strategy = MixUserModeStrategy(_Downloader())
+    items = asyncio.run(strategy.collect_items("sec_uid_x", {"uid": "uid-1"}))
+    assert [item["aweme_id"] for item in items] == ["m-new"]
+
+
 def test_music_strategy_filters_partial_aweme_items_without_metadata_inflation():
     class _API:
         async def get_user_music(self, _sec_uid, max_cursor=0, count=20):
@@ -276,6 +370,52 @@ def test_music_strategy_expansion_does_not_apply_number_limit_early():
     strategy = MusicUserModeStrategy(_Downloader())
     items = asyncio.run(strategy.collect_items("sec_uid_x", {"uid": "uid-1"}))
     assert [item["aweme_id"] for item in items] == ["mu-1", "mu-2"]
+
+
+def test_music_strategy_applies_incremental_filter_after_expansion():
+    class _Database:
+        async def get_incremental_latest_time(self, _scope_key):
+            return 1700000000
+
+    class _API:
+        async def get_user_music(self, _sec_uid, max_cursor=0, count=20):
+            return {
+                "items": [{"music_info": {"id": "music-1"}}],
+                "has_more": False,
+                "max_cursor": 0,
+            }
+
+        async def get_music_aweme(self, _music_id, cursor=0, count=20):
+            return {
+                "items": [
+                    {"aweme_id": "mu-old", "create_time": 1699999999},
+                    {"aweme_id": "mu-new", "create_time": 1700000001},
+                ],
+                "has_more": False,
+                "max_cursor": 0,
+            }
+
+    class _Downloader:
+        def __init__(self):
+            self.api_client = _API()
+            self.rate_limiter = _NoopRateLimiter()
+            self.database = _Database()
+            self.config = type(
+                "Cfg",
+                (),
+                {
+                    "get": lambda _self, key, default=None: {
+                        "number": {"music": 0},
+                        "increase": {"music": True},
+                    }.get(key, default)
+                },
+            )()
+            self._filter_by_time = lambda items: items
+            self._limit_count = lambda items, _mode: items
+
+    strategy = MusicUserModeStrategy(_Downloader())
+    items = asyncio.run(strategy.collect_items("sec_uid_x", {"uid": "uid-1"}))
+    assert [item["aweme_id"] for item in items] == ["mu-new"]
 
 
 def test_collect_strategy_expands_collect_folders_and_deduplicates_aweme():

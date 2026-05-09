@@ -1,8 +1,10 @@
-from pathlib import Path
-
 from gui_app.app import (
     build_worker_request,
+    describe_skipped_target,
+    describe_success_target,
     detect_worker_python,
+    load_cookie_text_from_path,
+    load_default_cookie_text,
     normalize_python_executable,
     parse_cookie_text,
 )
@@ -21,6 +23,57 @@ def test_parse_cookie_text_supports_cookie_header():
 def test_parse_cookie_text_supports_list_payload():
     cookies = parse_cookie_text('[{"name": "ttwid", "value": "abc"}, {"name": "msToken", "value": "xyz"}]')
     assert cookies == {"ttwid": "abc", "msToken": "xyz"}
+
+
+def test_load_cookie_text_from_path_supports_config_yml(tmp_path):
+    config_file = tmp_path / "config.yml"
+    config_file.write_text(
+        """
+cookies:
+  ttwid: abc
+  msToken: xyz
+""".strip(),
+        encoding="utf-8",
+    )
+
+    cookies = parse_cookie_text(load_cookie_text_from_path(config_file))
+    assert cookies == {"ttwid": "abc", "msToken": "xyz"}
+
+
+def test_load_default_cookie_text_prefers_config_yml_over_cookie_json(tmp_path):
+    config_file = tmp_path / "config.yml"
+    config_file.write_text(
+        """
+cookies:
+  ttwid: from-config
+  msToken: from-config-token
+""".strip(),
+        encoding="utf-8",
+    )
+    cookie_dir = tmp_path / "config"
+    cookie_dir.mkdir()
+    (cookie_dir / "cookies.json").write_text(
+        '{"ttwid": "from-json", "msToken": "from-json-token"}',
+        encoding="utf-8",
+    )
+
+    content, source = load_default_cookie_text(project_root=tmp_path)
+
+    assert parse_cookie_text(content) == {
+        "ttwid": "from-config",
+        "msToken": "from-config-token",
+    }
+    assert source == str(config_file)
+
+
+def test_describe_success_target_handles_user_downloads():
+    message = describe_success_target({"url_type": "user"})
+    assert message == "Downloaded user content."
+
+
+def test_describe_skipped_target_handles_user_downloads():
+    message = describe_skipped_target({"url_type": "user"})
+    assert message == "All matching user items were already available locally."
 
 
 def test_normalize_python_executable_prefers_python_exe(tmp_path):

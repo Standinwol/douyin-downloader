@@ -1,5 +1,5 @@
-import json
 import asyncio
+import json
 
 import pytest
 
@@ -83,6 +83,24 @@ async def test_database_transcript_job_upsert(tmp_path):
     row = await database.get_transcript_job("123")
     assert row["status"] == "success"
     assert row["skip_reason"] is None
+
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_database_incremental_state_keeps_latest_timestamp(tmp_path):
+    db_path = tmp_path / "test.db"
+    database = Database(str(db_path))
+    await database.initialize()
+
+    await database.update_incremental_latest_time("user_mode:like:uid-1", 1700000001)
+    await database.update_incremental_latest_time("user_mode:like:uid-1", 1699999999)
+    await database.update_incremental_latest_time("user_mode:like:uid-1", 1700000005)
+
+    assert (
+        await database.get_incremental_latest_time("user_mode:like:uid-1")
+        == 1700000005
+    )
 
     await database.close()
 

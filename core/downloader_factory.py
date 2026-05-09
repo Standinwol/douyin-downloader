@@ -1,14 +1,15 @@
-from typing import Dict, Any, Optional
-from core.downloader_base import BaseDownloader
-from core.video_downloader import VideoDownloader
-from core.user_downloader import UserDownloader
-from core.mix_downloader import MixDownloader
-from core.music_downloader import MusicDownloader
-from config import ConfigLoader
-from storage import Database, FileManager
+from typing import Any, Optional
+
 from auth import CookieManager
+from config import ConfigLoader
 from control import QueueManager, RateLimiter, RetryHandler
 from core.api_client import DouyinAPIClient
+from core.downloader_base import BaseDownloader
+from core.mix_downloader import MixDownloader
+from core.music_downloader import MusicDownloader
+from core.user_downloader import UserDownloader
+from core.video_downloader import VideoDownloader
+from storage import Database, FileManager
 from utils.logger import setup_logger
 
 logger = setup_logger('DownloaderFactory')

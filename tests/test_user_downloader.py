@@ -268,3 +268,71 @@ def test_user_post_reports_step_and_item_progress(tmp_path, monkeypatch):
     assert statuses.count("success") == 1
     assert statuses.count("skipped") == 1
     assert statuses.count("failed") == 1
+
+
+def test_download_mode_items_passes_incremental_scope_and_updates_skipped_items(
+    tmp_path, monkeypatch
+):
+    class _FakeDatabase:
+        def __init__(self):
+            self.updates = []
+
+        async def is_downloaded(self, _aweme_id: str) -> bool:
+            return False
+
+        async def update_incremental_latest_time(self, scope_key: str, latest_time: int):
+            self.updates.append((scope_key, latest_time))
+
+    api_client = _FakeAPIClient()
+    config_data = {
+        "number": {"like": 0},
+        "increase": {"like": True},
+        "mode": ["like"],
+        "thread": 2,
+        "browser_fallback": {"enabled": False},
+    }
+    config = _FakeConfig(config_data)
+    file_manager = FileManager(str(tmp_path / "Downloaded"))
+    database = _FakeDatabase()
+    downloader = UserDownloader(
+        config=config,
+        api_client=api_client,
+        file_manager=file_manager,
+        cookie_manager=_FakeCookieManager(),
+        database=database,
+        rate_limiter=_NoopRateLimiter(),
+        retry_handler=None,
+        queue_manager=QueueManager(max_workers=2),
+    )
+
+    async def _fake_should_download(aweme_id):
+        return aweme_id != "111"
+
+    captured_scopes = []
+
+    async def _fake_download_aweme_assets(item, _author_name, mode=None, incremental_scope=None):
+        captured_scopes.append((item.get("aweme_id"), mode, incremental_scope))
+        await downloader._update_incremental_state_for_aweme(
+            item, incremental_scope=incremental_scope
+        )
+        return True
+
+    monkeypatch.setattr(downloader, "_should_download", _fake_should_download)
+    monkeypatch.setattr(downloader, "_download_aweme_assets", _fake_download_aweme_assets)
+
+    result = asyncio.run(
+        downloader._download_mode_items(
+            "like",
+            [_make_aweme("111"), _make_aweme("222")],
+            "tester",
+            incremental_scope="user_mode:like:uid-1",
+        )
+    )
+
+    assert result.skipped == 1
+    assert result.success == 1
+    assert captured_scopes == [("222", "like", "user_mode:like:uid-1")]
+    assert sorted(database.updates) == [
+        ("user_mode:like:uid-1", 1700000000),
+        ("user_mode:like:uid-1", 1700000000),
+    ]

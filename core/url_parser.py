@@ -1,7 +1,8 @@
 import re
-from typing import Optional, Dict, Any
-from utils.validators import parse_url_type
+from typing import Any, Dict, Optional
+
 from utils.logger import setup_logger
+from utils.validators import parse_url_type
 
 logger = setup_logger('URLParser')
 

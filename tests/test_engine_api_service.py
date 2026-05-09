@@ -77,7 +77,9 @@ def test_single_item_service_resolves_short_link_and_returns_artifacts(
     ]
 
 
-def test_single_item_service_rejects_unsupported_user_urls(monkeypatch, tmp_path):
+def test_single_item_service_supports_user_urls_and_aggregates_artifacts(
+    monkeypatch, tmp_path
+):
     class _FakeAPIClient:
         def __init__(self, cookies, proxy=None):
             self.cookies = cookies
@@ -89,6 +91,37 @@ def test_single_item_service_rejects_unsupported_user_urls(monkeypatch, tmp_path
         async def __aexit__(self, exc_type, exc, tb):
             return None
 
+    class _FakeDownloader:
+        def __init__(self):
+            item_one = tmp_path / "demo-author" / "post" / "item-1"
+            item_two = tmp_path / "demo-author" / "post" / "item-2"
+            self.artifact_records = [
+                {
+                    "aweme_id": "111",
+                    "media_type": "video",
+                    "output_dir": str(item_one),
+                    "file_paths": [str(item_one / "first.mp4")],
+                    "file_names": ["first.mp4"],
+                },
+                {
+                    "aweme_id": "222",
+                    "media_type": "gallery",
+                    "output_dir": str(item_two),
+                    "file_paths": [
+                        str(item_two / "second_1.jpg"),
+                        str(item_two / "second_2.jpg"),
+                    ],
+                    "file_names": ["second_1.jpg", "second_2.jpg"],
+                },
+            ]
+
+        async def download(self, parsed_url):
+            assert parsed_url["sec_uid"] == "demo-sec-uid"
+            result = DownloadResult()
+            result.total = 2
+            result.success = 2
+            return result
+
     monkeypatch.setattr("engine_api.service.DouyinAPIClient", _FakeAPIClient)
     monkeypatch.setattr(
         "engine_api.service.URLParser.parse",
@@ -97,6 +130,10 @@ def test_single_item_service_rejects_unsupported_user_urls(monkeypatch, tmp_path
             "sec_uid": "demo-sec-uid",
             "original_url": url,
         },
+    )
+    monkeypatch.setattr(
+        "engine_api.service.DownloaderFactory.create",
+        lambda *args, **kwargs: _FakeDownloader(),
     )
 
     request = SingleItemDownloadRequest(
@@ -107,6 +144,19 @@ def test_single_item_service_rejects_unsupported_user_urls(monkeypatch, tmp_path
     )
     response = run_single_item_download_sync(request)
 
-    assert response.status == "failed"
-    assert response.error_code == "unsupported_url_type"
+    assert response.status == "success"
     assert response.url_type == "user"
+    assert response.error_code == ""
+    assert response.aweme_id == ""
+    assert response.media_type == "mixed"
+    assert response.output_dir == str(tmp_path / "demo-author" / "post")
+    assert response.saved_files == [
+        str(tmp_path / "demo-author" / "post" / "item-1" / "first.mp4"),
+        str(tmp_path / "demo-author" / "post" / "item-2" / "second_1.jpg"),
+        str(tmp_path / "demo-author" / "post" / "item-2" / "second_2.jpg"),
+    ]
+    assert response.file_names == [
+        "first.mp4",
+        "second_1.jpg",
+        "second_2.jpg",
+    ]

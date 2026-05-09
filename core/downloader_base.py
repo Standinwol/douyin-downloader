@@ -1,7 +1,7 @@
 import json
 import re
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 from urllib.parse import urlparse
@@ -148,7 +148,7 @@ class BaseDownloader(ABC):
 
         if in_db and not in_local:
             logger.info(
-                "Aweme %s exists in database but media file not found locally, retry download",
+                "Aweme %s exists in database but no complete local artifact record was found, retry download",
                 aweme_id,
             )
             return True
@@ -171,24 +171,61 @@ class BaseDownloader(ABC):
         return aweme_id in self._local_aweme_ids
 
     def _build_local_aweme_index(self):
-        base_path = self.file_manager.base_path
         aweme_ids: set[str] = set()
+        manifest_path = self.file_manager.base_path / "download_manifest.jsonl"
 
-        if base_path.exists():
-            for path in base_path.rglob("*"):
-                if not path.is_file():
-                    continue
-                if path.suffix.lower() not in self._local_media_suffixes:
-                    continue
-                try:
-                    if path.stat().st_size <= 0:
-                        continue
-                except OSError:
-                    continue
-                for match in self._aweme_id_pattern.finditer(path.name):
-                    aweme_ids.add(match.group(1))
+        if manifest_path.exists():
+            aweme_ids.update(self._load_successful_aweme_ids_from_manifest(manifest_path))
 
         self._local_aweme_ids = aweme_ids
+
+    def _load_successful_aweme_ids_from_manifest(self, manifest_path: Path) -> set[str]:
+        aweme_ids: set[str] = set()
+
+        try:
+            with manifest_path.open("r", encoding="utf-8") as manifest_file:
+                for raw_line in manifest_file:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.debug("Skip malformed manifest line in %s", manifest_path)
+                        continue
+
+                    aweme_id = str(record.get("aweme_id") or "").strip()
+                    file_paths = record.get("file_paths")
+                    if not aweme_id or not isinstance(file_paths, list) or not file_paths:
+                        continue
+
+                    resolved_paths = self._resolve_manifest_file_paths(file_paths)
+                    if not resolved_paths:
+                        continue
+
+                    if all(self.file_manager.file_exists(path) for path in resolved_paths):
+                        aweme_ids.add(aweme_id)
+        except OSError as exc:
+            logger.warning("Failed to read download manifest %s: %s", manifest_path, exc)
+
+        return aweme_ids
+
+    def _resolve_manifest_file_paths(self, raw_paths: List[Any]) -> List[Path]:
+        resolved_paths: List[Path] = []
+        for raw_path in raw_paths:
+            if not isinstance(raw_path, str):
+                continue
+
+            normalized = raw_path.strip()
+            if not normalized:
+                continue
+
+            candidate = Path(normalized)
+            if not candidate.is_absolute():
+                candidate = self.file_manager.base_path / candidate
+            resolved_paths.append(candidate)
+        return resolved_paths
 
     def _mark_local_aweme_downloaded(self, aweme_id: str):
         if not aweme_id:
@@ -211,7 +248,7 @@ class BaseDownloader(ABC):
             else None
         )
         end_ts = (
-            int(datetime.strptime(end_time, "%Y-%m-%d").timestamp())
+            int((datetime.strptime(end_time, "%Y-%m-%d") + timedelta(days=1)).timestamp())
             if end_time
             else None
         )
@@ -221,7 +258,7 @@ class BaseDownloader(ABC):
             create_time = aweme.get("create_time", 0)
             if start_ts is not None and create_time < start_ts:
                 continue
-            if end_ts is not None and create_time > end_ts:
+            if end_ts is not None and create_time >= end_ts:
                 continue
             filtered.append(aweme)
 
@@ -242,6 +279,7 @@ class BaseDownloader(ABC):
         aweme_data: Dict[str, Any],
         author_name: str,
         mode: Optional[str] = None,
+        incremental_scope: Optional[str] = None,
     ) -> bool:
         aweme_id = aweme_data.get("aweme_id")
         if not aweme_id:
@@ -412,6 +450,9 @@ class BaseDownloader(ABC):
                     "metadata": metadata_json,
                 }
             )
+        await self._update_incremental_state_for_aweme(
+            aweme_data, incremental_scope=incremental_scope
+        )
 
         if media_type == "video" and video_path is not None:
             transcript_result = await self.transcript_manager.process_video(
@@ -504,6 +545,30 @@ class BaseDownloader(ABC):
                 f"Download error for {save_path.name}: {error}",
             )
             return False
+
+    async def _update_incremental_state_for_aweme(
+        self,
+        aweme_data: Dict[str, Any],
+        *,
+        incremental_scope: Optional[str] = None,
+    ) -> None:
+        if not self.database or not incremental_scope:
+            return
+
+        create_time = aweme_data.get("create_time")
+        try:
+            create_ts = int(create_time)
+        except (TypeError, ValueError):
+            return
+
+        if create_ts <= 0:
+            return
+
+        updater = getattr(self.database, "update_incremental_latest_time", None)
+        if not callable(updater):
+            return
+
+        await updater(incremental_scope, create_ts)
 
     # aweme_type codes that indicate image/note content
     _GALLERY_AWEME_TYPES = {2, 68, 150}

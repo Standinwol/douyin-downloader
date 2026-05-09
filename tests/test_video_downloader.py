@@ -4,6 +4,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
 from auth import CookieManager
 from config import ConfigLoader
 from control import QueueManager, RateLimiter, RetryHandler
@@ -144,11 +145,51 @@ async def test_should_download_skips_when_aweme_exists_locally(tmp_path):
 
     existing_file = tmp_path / f"2026-02-18_demo_{aweme_id}.mp4"
     existing_file.write_bytes(b"1")
+    manifest_path = tmp_path / "download_manifest.jsonl"
+    manifest_path.write_text(
+        json.dumps({"aweme_id": aweme_id, "file_paths": [existing_file.name]}) + "\n",
+        encoding="utf-8",
+    )
 
     should_download = await downloader._should_download(aweme_id)
     assert should_download is False
 
     await api_client.close()
+
+
+@pytest.mark.asyncio
+async def test_should_download_retries_partial_gallery_without_manifest(tmp_path):
+    downloader, api_client = _build_downloader(tmp_path)
+    aweme_id = "7600223638943468864"
+
+    partial_file = tmp_path / f"2026-02-18_demo_{aweme_id}_1.jpg"
+    partial_file.write_bytes(b"1")
+
+    should_download = await downloader._should_download(aweme_id)
+    assert should_download is True
+
+    await api_client.close()
+
+
+def test_filter_by_time_includes_full_end_date(tmp_path):
+    downloader, api_client = _build_downloader(tmp_path)
+    downloader.config.update(end_time="2024-02-07")
+
+    filtered = downloader._filter_by_time(
+        [
+            {
+                "aweme_id": "within-day",
+                "create_time": int(datetime(2024, 2, 7, 12, 0, 0).timestamp()),
+            },
+            {
+                "aweme_id": "next-day",
+                "create_time": int(datetime(2024, 2, 8, 0, 0, 0).timestamp()),
+            },
+        ]
+    )
+
+    assert [item["aweme_id"] for item in filtered] == ["within-day"]
+    asyncio.run(api_client.close())
 
 
 @pytest.mark.asyncio

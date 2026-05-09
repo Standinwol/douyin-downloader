@@ -112,6 +112,7 @@ class UserDownloader(BaseDownloader):
         items: List[Dict[str, Any]],
         author_name: str,
         seen_aweme_ids: Optional[Set[str]] = None,
+        incremental_scope: Optional[str] = None,
     ) -> DownloadResult:
         if seen_aweme_ids is None:
             seen_aweme_ids = set()
@@ -136,10 +137,18 @@ class UserDownloader(BaseDownloader):
         async def _process_aweme(item: Dict[str, Any]):
             aweme_id = item.get("aweme_id")
             if not await self._should_download(str(aweme_id or "")):
+                await self._update_incremental_state_for_aweme(
+                    item, incremental_scope=incremental_scope
+                )
                 self._progress_advance_item("skipped", str(aweme_id or "unknown"))
                 return {"status": "skipped", "aweme_id": aweme_id}
 
-            success = await self._download_aweme_assets(item, author_name, mode=mode)
+            success = await self._download_aweme_assets(
+                item,
+                author_name,
+                mode=mode,
+                incremental_scope=incremental_scope,
+            )
             status = "success" if success else "failed"
             self._progress_advance_item(status, str(aweme_id or "unknown"))
             return {

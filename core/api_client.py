@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
 import aiohttp
+
 from auth import MsTokenManager
 from utils.cookie_utils import sanitize_cookies
 from utils.logger import setup_logger

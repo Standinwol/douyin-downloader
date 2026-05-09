@@ -1,18 +1,18 @@
-import asyncio
 import argparse
+import asyncio
 import json
 import logging
 import sys
 from pathlib import Path
 from typing import Any
 
-from config import ConfigLoader
 from auth import CookieManager
-from storage import Database, FileManager
-from control import QueueManager, RateLimiter, RetryHandler
-from core import DouyinAPIClient, URLParser, DownloaderFactory
 from cli.progress_display import ProgressDisplay
-from utils.logger import setup_logger, set_console_log_level
+from config import ConfigLoader
+from control import QueueManager, RateLimiter, RetryHandler
+from core import DouyinAPIClient, DownloaderFactory, URLParser
+from storage import Database, FileManager
+from utils.logger import set_console_log_level, setup_logger
 
 logger = setup_logger('CLI')
 display = ProgressDisplay()

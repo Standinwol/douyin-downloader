@@ -1,7 +1,7 @@
 import json
 
-from engine_api.contracts import SingleItemDownloadResponse
-from engine_api.worker import main
+from engine_api.contracts import SingleItemDownloadRequest, SingleItemDownloadResponse
+from engine_api.worker import _emit_stdout, main
 
 
 def test_worker_emits_final_completed_event(monkeypatch, tmp_path, capsys):
@@ -58,3 +58,55 @@ def test_worker_reports_invalid_request_payload(tmp_path, capsys):
     payload = json.loads(lines[0])
     assert payload["event"] == "job.failed"
     assert payload["error_code"] == "invalid_request_payload"
+
+
+def test_request_from_mapping_parses_boolean_strings():
+    request = SingleItemDownloadRequest.from_mapping(
+        {
+            "url": "https://www.douyin.com/video/1234567890123456789",
+            "output_dir": "./Downloaded",
+            "cover": "false",
+            "music": "0",
+            "avatar": "no",
+            "json": "off",
+            "folderstyle": "true",
+            "database": "1",
+        }
+    )
+
+    assert request.cover is False
+    assert request.music is False
+    assert request.avatar is False
+    assert request.json is False
+    assert request.folderstyle is True
+    assert request.database is True
+
+
+def test_emit_stdout_escapes_non_ascii_payload(monkeypatch):
+    written = []
+
+    class _AsciiOnlyStdout:
+        def write(self, text):
+            assert isinstance(text, str)
+            assert all(ord(char) < 128 for char in text)
+            written.append(text)
+            return len(text)
+
+        def flush(self):
+            return None
+
+    monkeypatch.setattr("engine_api.worker.sys.stdout", _AsciiOnlyStdout())
+
+    _emit_stdout(
+        {
+            "event": "job.completed",
+            "response": {
+                "saved_files": ["E:/下载/作者/作品.mp4"],
+                "file_names": ["作品.mp4"],
+            },
+        }
+    )
+
+    payload = json.loads("".join(written))
+    assert payload["response"]["saved_files"] == ["E:/下载/作者/作品.mp4"]
+    assert payload["response"]["file_names"] == ["作品.mp4"]

@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from control import QueueManager, RateLimiter, RetryHandler
-from core import DownloaderFactory, DouyinAPIClient, URLParser
+from core import DouyinAPIClient, DownloaderFactory, URLParser
 from storage import Database, FileManager
 
 from .contracts import SingleItemDownloadRequest, SingleItemDownloadResponse
 from .runtime import EventProgressReporter, RuntimeConfig, RuntimeCookieManager
 
-SUPPORTED_SINGLE_ITEM_TYPES = {"video", "gallery"}
+SUPPORTED_WORKER_URL_TYPES = {"video", "gallery", "user", "collection", "music"}
 
 
 def _emit(
@@ -67,6 +68,84 @@ def _failure_response(
         error_code=error_code,
         error_message=error_message,
     )
+
+
+def _collect_response_artifacts(
+    artifacts: Any,
+    *,
+    fallback_output_dir: str,
+    url_type: str,
+    parsed_url: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    parsed_url = parsed_url or {}
+    normalized_artifacts = [
+        artifact for artifact in (artifacts or []) if isinstance(artifact, dict)
+    ]
+    saved_files = []
+    file_names = []
+    output_dirs = []
+    aweme_ids = []
+    media_types = []
+
+    for artifact in normalized_artifacts:
+        saved_files.extend(
+            str(path)
+            for path in artifact.get("file_paths") or []
+            if isinstance(path, str) and path.strip()
+        )
+        file_names.extend(
+            str(name)
+            for name in artifact.get("file_names") or []
+            if isinstance(name, str) and name.strip()
+        )
+        output_dir = artifact.get("output_dir")
+        if isinstance(output_dir, str) and output_dir.strip():
+            output_dirs.append(output_dir)
+
+        aweme_id = artifact.get("aweme_id")
+        if isinstance(aweme_id, str) and aweme_id.strip():
+            aweme_ids.append(aweme_id)
+
+        media_type = artifact.get("media_type")
+        if isinstance(media_type, str) and media_type.strip():
+            media_types.append(media_type)
+
+    output_dir = str(fallback_output_dir or "").strip()
+    if output_dirs:
+        try:
+            output_dir = os.path.commonpath(output_dirs)
+        except ValueError:
+            output_dir = output_dirs[-1]
+
+    aweme_id = ""
+    if len(set(aweme_ids)) == 1:
+        aweme_id = aweme_ids[0]
+    elif len(normalized_artifacts) <= 1:
+        aweme_id = str(
+            parsed_url.get("aweme_id") or parsed_url.get("note_id") or ""
+        ).strip()
+
+    unique_media_types = {
+        str(media_type).strip() for media_type in media_types if str(media_type).strip()
+    }
+    if len(unique_media_types) == 1:
+        media_type = next(iter(unique_media_types))
+    elif unique_media_types:
+        media_type = "mixed"
+    elif url_type == "gallery":
+        media_type = "gallery"
+    elif url_type == "video":
+        media_type = "video"
+    else:
+        media_type = ""
+
+    return {
+        "aweme_id": aweme_id,
+        "media_type": media_type,
+        "output_dir": output_dir,
+        "saved_files": saved_files,
+        "file_names": file_names,
+    }
 
 
 async def run_single_item_download(
@@ -141,12 +220,12 @@ async def run_single_item_download(
                 )
 
             url_type = str(parsed_url.get("type") or "")
-            if url_type not in SUPPORTED_SINGLE_ITEM_TYPES:
+            if url_type not in SUPPORTED_WORKER_URL_TYPES:
                 return _failure_response(
                     request,
                     error_code="unsupported_url_type",
                     error_message=(
-                        "Only single video and gallery links are supported by the stable worker API"
+                        "Unsupported URL type for the desktop worker API"
                     ),
                     resolved_url=resolved_url,
                     url_type=url_type,
@@ -177,7 +256,12 @@ async def run_single_item_download(
 
             result = await downloader.download(parsed_url)
             artifacts = getattr(downloader, "artifact_records", [])
-            primary_artifact = artifacts[-1] if artifacts else {}
+            artifact_summary = _collect_response_artifacts(
+                artifacts,
+                fallback_output_dir=str(config.get("path")),
+                url_type=url_type,
+                parsed_url=parsed_url,
+            )
 
             if database is not None:
                 await database.add_history(
@@ -202,19 +286,11 @@ async def run_single_item_download(
                 request_url=request.url,
                 resolved_url=resolved_url,
                 url_type=url_type,
-                aweme_id=str(
-                    primary_artifact.get("aweme_id")
-                    or parsed_url.get("aweme_id")
-                    or parsed_url.get("note_id")
-                    or ""
-                ),
-                media_type=str(
-                    primary_artifact.get("media_type")
-                    or ("gallery" if url_type == "gallery" else "video")
-                ),
-                output_dir=str(primary_artifact.get("output_dir") or config.get("path")),
-                saved_files=list(primary_artifact.get("file_paths") or []),
-                file_names=list(primary_artifact.get("file_names") or []),
+                aweme_id=str(artifact_summary["aweme_id"]),
+                media_type=str(artifact_summary["media_type"]),
+                output_dir=str(artifact_summary["output_dir"]),
+                saved_files=list(artifact_summary["saved_files"]),
+                file_names=list(artifact_summary["file_names"]),
                 total=result.total,
                 success_count=result.success,
                 failed_count=result.failed,

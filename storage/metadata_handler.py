@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import aiofiles
+
 from utils.logger import setup_logger
 
 logger = setup_logger("MetadataHandler")

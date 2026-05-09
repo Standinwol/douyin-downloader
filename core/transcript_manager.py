@@ -121,7 +121,6 @@ class TranscriptManager:
                 video_path=video_path,
                 model=model,
             )
-            text = str(payload.get("text", "")).strip()
             await self._write_outputs(payload, text_path, json_path)
             await self._record_job(
                 aweme_id=aweme_id,

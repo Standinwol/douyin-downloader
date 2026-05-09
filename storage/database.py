@@ -1,7 +1,8 @@
 import asyncio
-import aiosqlite
-from typing import Dict, Any, Optional
 from datetime import datetime
+from typing import Any, Dict, Optional
+
+import aiosqlite
 
 
 class Database:
@@ -69,6 +70,14 @@ class Database:
             )
         ''')
 
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS incremental_state (
+                scope_key TEXT PRIMARY KEY,
+                latest_create_time INTEGER NOT NULL,
+                updated_at INTEGER
+            )
+        ''')
+
         await db.execute('CREATE INDEX IF NOT EXISTS idx_aweme_id ON aweme(aweme_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_author_id ON aweme(author_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_download_time ON aweme(download_time)')
@@ -114,6 +123,46 @@ class Database:
         )
         result = await cursor.fetchone()
         return result[0] if result and result[0] else None
+
+    async def get_incremental_latest_time(self, scope_key: str) -> Optional[int]:
+        db = await self._get_conn()
+        cursor = await db.execute(
+            'SELECT latest_create_time FROM incremental_state WHERE scope_key = ?',
+            (scope_key,),
+        )
+        result = await cursor.fetchone()
+        return result[0] if result and result[0] is not None else None
+
+    async def update_incremental_latest_time(
+        self, scope_key: str, latest_create_time: int
+    ):
+        if not scope_key:
+            return
+        try:
+            latest_time = int(latest_create_time)
+        except (TypeError, ValueError):
+            return
+        if latest_time <= 0:
+            return
+
+        db = await self._get_conn()
+        now_ts = int(datetime.now().timestamp())
+        await db.execute('''
+            INSERT INTO incremental_state (scope_key, latest_create_time, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(scope_key) DO UPDATE SET
+                latest_create_time = CASE
+                    WHEN excluded.latest_create_time > incremental_state.latest_create_time
+                        THEN excluded.latest_create_time
+                    ELSE incremental_state.latest_create_time
+                END,
+                updated_at = excluded.updated_at
+        ''', (
+            scope_key,
+            latest_time,
+            now_ts,
+        ))
+        await db.commit()
 
     async def add_history(self, history_data: Dict[str, Any]):
         db = await self._get_conn()

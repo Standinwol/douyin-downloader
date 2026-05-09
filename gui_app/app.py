@@ -11,8 +11,9 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Tuple
 
+from config import ConfigLoader
 from utils.cookie_utils import parse_cookie_header, sanitize_cookies
 
 APP_TITLE = "Douyin Downloader Desktop"
@@ -20,6 +21,32 @@ DEFAULT_WINDOW_SIZE = "1180x780"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "Downloaded"
 DEFAULT_STATE_PATH = PROJECT_ROOT / ".gui-state.json"
+
+
+def describe_success_target(response: Dict[str, Any]) -> str:
+    url_type = str(response.get("url_type") or "").strip()
+    aweme_id = str(response.get("aweme_id") or "").strip()
+
+    if url_type == "user":
+        return "Downloaded user content."
+    if url_type == "collection":
+        return "Downloaded collection content."
+    if url_type == "music":
+        return "Downloaded music content."
+    if aweme_id:
+        return f"Downloaded aweme {aweme_id}."
+    return "Downloaded content successfully."
+
+
+def describe_skipped_target(response: Dict[str, Any]) -> str:
+    url_type = str(response.get("url_type") or "").strip()
+    if url_type == "user":
+        return "All matching user items were already available locally."
+    if url_type == "collection":
+        return "All matching collection items were already available locally."
+    if url_type == "music":
+        return "All matching music items were already available locally."
+    return "The target was already available locally."
 
 
 def normalize_python_executable(path: str) -> str:
@@ -111,14 +138,52 @@ def default_cookie_paths(project_root: Path = PROJECT_ROOT) -> Iterable[Path]:
     )
 
 
-def load_default_cookie_text(project_root: Path = PROJECT_ROOT) -> str:
+def default_config_paths(project_root: Path = PROJECT_ROOT) -> Iterable[Path]:
+    return (
+        project_root / "config.yml",
+        project_root / "config.yaml",
+    )
+
+
+def load_cookie_text_from_path(path: Path) -> str:
+    suffix = path.suffix.lower()
+
+    if suffix in {".yml", ".yaml"}:
+        try:
+            cookies = ConfigLoader(str(path)).get_cookies()
+        except Exception:
+            return ""
+        return format_cookie_text(cookies) if cookies else ""
+
+    if suffix == ".json":
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = None
+        if isinstance(payload, (dict, list)):
+            cookies = parse_cookie_text(json.dumps(payload, ensure_ascii=False))
+            return format_cookie_text(cookies) if cookies else ""
+
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+def load_default_cookie_text(project_root: Path = PROJECT_ROOT) -> Tuple[str, str]:
+    for path in default_config_paths(project_root):
+        if not path.exists():
+            continue
+        content = load_cookie_text_from_path(path)
+        if content:
+            return content, str(path)
+
     for path in default_cookie_paths(project_root):
         if path.exists():
-            try:
-                return format_cookie_text(json.loads(path.read_text(encoding="utf-8")))
-            except Exception:
-                continue
-    return ""
+            content = load_cookie_text_from_path(path)
+            if content:
+                return content, str(path)
+    return "", ""
 
 
 def load_gui_state(state_path: Path = DEFAULT_STATE_PATH) -> Dict[str, Any]:
@@ -158,7 +223,7 @@ class DouyinDownloaderApp:
         self.proxy_var = tk.StringVar()
         self.python_var = tk.StringVar(value=detect_worker_python())
         self.status_var = tk.StringVar(value="Ready")
-        self.step_var = tk.StringVar(value="Enter a Douyin single video or gallery URL to begin.")
+        self.step_var = tk.StringVar(value="Enter a supported Douyin URL to begin.")
         self.summary_var = tk.StringVar(value="No downloads yet.")
         self.cover_var = tk.BooleanVar(value=True)
         self.music_var = tk.BooleanVar(value=True)
@@ -208,7 +273,7 @@ class DouyinDownloaderApp:
         ttk.Label(header, text=APP_TITLE, style="Heading.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
             header,
-            text="Stable desktop wrapper for the JSON worker API. Best for single video or gallery links.",
+            text="Desktop wrapper for the JSON worker API. Supports video, gallery, and user links.",
             style="Muted.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
@@ -363,10 +428,10 @@ class DouyinDownloaderApp:
             if key in state:
                 variable.set(bool(state[key]))
 
-        default_cookies = load_default_cookie_text()
+        default_cookies, source = load_default_cookie_text()
         if default_cookies:
             self.cookie_text.insert("1.0", default_cookies)
-            self._append_log("Loaded cookies from the default cookie file.")
+            self._append_log(f"Loaded cookies from {source}.")
 
     def _save_state(self) -> None:
         save_gui_state(
@@ -402,6 +467,7 @@ class DouyinDownloaderApp:
         path = filedialog.askopenfilename(
             title="Load cookies",
             filetypes=[
+                ("Config files", "*.yml;*.yaml"),
                 ("JSON files", "*.json"),
                 ("Text files", "*.txt;*.log"),
                 ("All files", "*.*"),
@@ -411,9 +477,12 @@ class DouyinDownloaderApp:
         if not path:
             return
         try:
-            content = Path(path).read_text(encoding="utf-8")
+            content = load_cookie_text_from_path(Path(path))
         except Exception as exc:
             messagebox.showerror("Cookie load failed", str(exc))
+            return
+        if not content:
+            messagebox.showinfo("No cookies found", f"No cookies were found in {path}.")
             return
 
         self.cookie_text.delete("1.0", "end")
@@ -421,13 +490,16 @@ class DouyinDownloaderApp:
         self._append_log(f"Loaded cookies from {path}")
 
     def _load_default_cookies(self) -> None:
-        content = load_default_cookie_text()
+        content, source = load_default_cookie_text()
         if not content:
-            messagebox.showinfo("No default cookies", "No config/cookies.json or .cookies.json file was found.")
+            messagebox.showinfo(
+                "No default cookies",
+                "No config.yml, config.yaml, config/cookies.json, or .cookies.json file was found.",
+            )
             return
         self.cookie_text.delete("1.0", "end")
         self.cookie_text.insert("1.0", content)
-        self._append_log("Loaded cookies from the default cookie file.")
+        self._append_log(f"Loaded cookies from {source}.")
 
     def _clear_cookies(self) -> None:
         self.cookie_text.delete("1.0", "end")
@@ -455,7 +527,7 @@ class DouyinDownloaderApp:
         python_executable = normalize_python_executable(self.python_var.get())
 
         if not url:
-            messagebox.showerror("Missing URL", "Enter a Douyin single video or gallery URL.")
+            messagebox.showerror("Missing URL", "Enter a supported Douyin URL.")
             return
         if not output_dir:
             messagebox.showerror("Missing output folder", "Choose where the downloaded files should be stored.")
@@ -616,7 +688,6 @@ class DouyinDownloaderApp:
     def _apply_final_response(self, response: Dict[str, Any]) -> None:
         status = str(response.get("status") or "failed")
         saved_files = [str(path) for path in response.get("saved_files") or []]
-        aweme_id = str(response.get("aweme_id") or "").strip()
         output_dir = str(response.get("output_dir") or self.output_dir_var.get()).strip()
         summary = (
             f"Success {response.get('success_count', 0)} / "
@@ -626,11 +697,11 @@ class DouyinDownloaderApp:
 
         if status == "success":
             self.status_var.set("Success")
-            self.step_var.set(f"Downloaded aweme {aweme_id or 'unknown'}.")
+            self.step_var.set(describe_success_target(response))
             self.progress.configure(value=self.items_total)
         elif status == "skipped":
             self.status_var.set("Skipped")
-            self.step_var.set("The target was already available locally.")
+            self.step_var.set(describe_skipped_target(response))
             self.progress.configure(value=self.items_total)
         else:
             self.status_var.set("Failed")
@@ -752,6 +823,6 @@ class DouyinDownloaderApp:
 
 def main() -> int:
     root = tk.Tk()
-    app = DouyinDownloaderApp(root)
+    DouyinDownloaderApp(root)
     root.mainloop()
     return 0

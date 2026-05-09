@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import parse_qs, unquote, urlparse
 
 import yaml
+
 from utils.cookie_utils import parse_cookie_header, sanitize_cookies
 
 DEFAULT_URL = "https://www.douyin.com/"

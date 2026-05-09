@@ -19,11 +19,11 @@ Change Log  :
 -------------------------------------------------
 """
 
-import time
 import random
+import time
+from typing import Callable, Dict, List, Union
 
-from gmssl import sm3, func
-from typing import Union, Callable, List, Dict
+from gmssl import func, sm3
 
 
 class StringProcessor:
@@ -353,6 +353,7 @@ class CryptoUtility:
         result_str = []
         index_b = self.big_array[1]
         initial_value = 0
+        value_e = 0
 
         for index, char in enumerate(bytes_str):
             if index == 0:

@@ -77,11 +77,11 @@ class XBogus:
         return self._md5_str_to_array(hashed)
 
     def _encoding_conversion(
-        self, a, b, c, e, d, t, f, r, n, o, i, _, x, u, s, l, v, h, p
+        self, a, b, c, e, d, t, f, r, n, o, i, _, x, u, s, l_value, v, h, p
     ) -> str:
         payload = [a]
         payload.append(int(i))
-        payload.extend([b, _, c, x, e, u, d, s, t, l, f, v, r, h, n, p, o])
+        payload.extend([b, _, c, x, e, u, d, s, t, l_value, f, v, r, h, n, p, o])
         return bytes(payload).decode("ISO-8859-1")
 
     def _encoding_conversion2(self, a: int, b: int, c: str) -> str:

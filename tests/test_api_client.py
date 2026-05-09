@@ -46,6 +46,19 @@ def test_build_signed_path_prefers_abogus(monkeypatch):
     assert "a_bogus=fake_ab" in signed_url
 
 
+def test_build_signed_path_real_abogus_smoke():
+    import core.api_client as api_module
+
+    if api_module.ABogus is None or api_module.BrowserFingerprintGenerator is None:
+        pytest.skip("ABogus support is unavailable")
+
+    client = DouyinAPIClient({"msToken": "token-1"})
+    client._abogus_enabled = True
+
+    signed_url, _ua = client.build_signed_path("/aweme/v1/web/aweme/detail/", {"a": 1})
+    assert "a_bogus=" in signed_url
+
+
 def test_browser_fallback_caps_warmup_wait(monkeypatch):
     class _FakeMouse:
         async def wheel(self, _x, _y):
