@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import posixpath
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from core.downloader_base import BaseDownloader, DownloadResult
@@ -121,8 +121,18 @@ class MusicDownloader(BaseDownloader):
 
         music_ext = self._infer_audio_extension(music_url)
         music_path = save_dir / f"{file_stem}{music_ext}"
+        downloaded_files: List[Any] = []
         if self.file_manager.file_exists(music_path):
             logger.info("Music already exists locally: %s", music_path.name)
+            downloaded_files.append(music_path)
+            await self._record_music_artifact(
+                music_id=record_id,
+                author_name=author_name,
+                title=title,
+                publish_date=publish_date,
+                save_dir=save_dir,
+                downloaded_files=downloaded_files,
+            )
             return True
 
         success = await self._download_with_retry(
@@ -133,6 +143,7 @@ class MusicDownloader(BaseDownloader):
         )
         if not success:
             return False
+        downloaded_files.append(music_path)
 
         cover_url = self._extract_first_url(
             detail.get("cover_large")
@@ -141,18 +152,21 @@ class MusicDownloader(BaseDownloader):
         )
         if cover_url and self.config.get("cover"):
             cover_path = save_dir / f"{file_stem}_cover.jpg"
-            await self._download_with_retry(
+            if await self._download_with_retry(
                 cover_url,
                 cover_path,
                 session,
                 headers=self._download_headers(),
                 optional=True,
-            )
+            ):
+                downloaded_files.append(cover_path)
 
         if self.config.get("json"):
-            await self.metadata_handler.save_metadata(
-                detail or {"music_id": music_id}, save_dir / f"{file_stem}_data.json"
-            )
+            json_path = save_dir / f"{file_stem}_data.json"
+            if await self.metadata_handler.save_metadata(
+                detail or {"music_id": music_id}, json_path
+            ):
+                downloaded_files.append(json_path)
 
         if self.database:
             await self.database.add_aweme(
@@ -169,19 +183,51 @@ class MusicDownloader(BaseDownloader):
                 author_sec_uid=extract_author_sec_uid(detail),
             )
 
-        await self.metadata_handler.append_download_manifest(
-            self.file_manager.base_path,
+        await self._record_music_artifact(
+            music_id=record_id,
+            author_name=author_name,
+            title=title,
+            publish_date=publish_date,
+            save_dir=save_dir,
+            downloaded_files=downloaded_files,
+        )
+        return True
+
+    async def _record_music_artifact(
+        self,
+        *,
+        music_id: str,
+        author_name: str,
+        title: str,
+        publish_date: str,
+        save_dir: Any,
+        downloaded_files: List[Any],
+    ) -> None:
+        manifest_record = {
+            "date": publish_date,
+            "aweme_id": music_id,
+            "author_name": author_name,
+            "desc": title,
+            "media_type": "music",
+            "file_names": [path.name for path in downloaded_files],
+            "file_paths": [self._to_manifest_path(path) for path in downloaded_files],
+        }
+        self._artifact_records.append(
             {
-                "date": publish_date,
-                "aweme_id": record_id,
+                "aweme_id": music_id,
                 "author_name": author_name,
                 "desc": title,
                 "media_type": "music",
-                "file_names": [music_path.name],
-                "file_paths": [self._to_manifest_path(music_path)],
-            },
+                "output_dir": str(save_dir.resolve()),
+                "file_names": list(manifest_record["file_names"]),
+                "file_paths": [str(path.resolve()) for path in downloaded_files],
+                "manifest_record": manifest_record,
+            }
         )
-        return True
+        await self.metadata_handler.append_download_manifest(
+            self.file_manager.base_path,
+            manifest_record,
+        )
 
     async def _get_music_detail(self, music_id: str) -> Optional[Dict[str, Any]]:
         getter = getattr(self.api_client, "get_music_detail", None)

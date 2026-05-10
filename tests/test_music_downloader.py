@@ -55,6 +55,8 @@ async def test_music_downloader_downloads_music_asset(tmp_path, monkeypatch):
     assert result.total == 1
     assert result.success == 1
     assert any(path.suffix == ".mp3" for path in saved_paths)
+    assert downloader.artifact_records
+    assert any(name.endswith(".mp3") for name in downloader.artifact_records[0]["file_names"])
 
 
 @pytest.mark.asyncio
