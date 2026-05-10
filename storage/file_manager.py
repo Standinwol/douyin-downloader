@@ -32,7 +32,16 @@ class FileManager:
         aweme_id: str = None,
         folderstyle: bool = True,
         download_date: str = "",
+        folder_name: Optional[str] = None,
     ) -> Path:
+        """Compute (and create) the destination directory for a download.
+
+        ``folder_name`` is the pre-rendered, already-sanitized leaf directory
+        name produced by ``utils.naming.render_template``. When provided, it
+        overrides the legacy ``{date}_{title}_{id}`` layout. When omitted we
+        fall back to the historical composition so external callers and the
+        sibling CLI project keep working unchanged.
+        """
         safe_author = sanitize_filename(author_name)
 
         if mode:
@@ -40,10 +49,14 @@ class FileManager:
         else:
             save_dir = self.base_path / safe_author
 
-        if folderstyle and aweme_title and aweme_id:
-            safe_title = sanitize_filename(aweme_title)
-            date_prefix = f"{download_date}_" if download_date else ""
-            save_dir = save_dir / f"{date_prefix}{safe_title}_{aweme_id}"
+        if folderstyle:
+            leaf = folder_name
+            if leaf is None and aweme_title and aweme_id:
+                safe_title = sanitize_filename(aweme_title)
+                date_prefix = f"{download_date}_" if download_date else ""
+                leaf = f"{date_prefix}{safe_title}_{aweme_id}"
+            if leaf:
+                save_dir = save_dir / leaf
 
         save_dir.mkdir(parents=True, exist_ok=True)
         return save_dir

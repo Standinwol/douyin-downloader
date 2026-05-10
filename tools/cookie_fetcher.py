@@ -216,6 +216,9 @@ async def wait_for_login_confirmation(
     nav_task = asyncio.create_task(goto_with_fallback(page, url))
     # Give the scheduled navigation task one loop turn so page.goto() starts
     # even when the user confirms immediately.
+    # 让 nav_task 至少进入第一个 await 点。否则在某些调度时序下，
+    # 若 input_func 立即返回（例如自动化测试或用户立刻按 Enter），
+    # 可能导致 goto 尚未被调度便被 cancel，从而漏掉页面加载。
     await asyncio.sleep(0)
     await asyncio.to_thread(input_func)
 

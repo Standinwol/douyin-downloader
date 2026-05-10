@@ -44,5 +44,11 @@ config*.yml
 .cookies.json
 config/cookies.json
 .omx/
-.omc/
 .gui-state.json
+
+# Editor / IDE local settings
+.claude/
+.idea/
+.vscode/
+.omc/
+.gstack/

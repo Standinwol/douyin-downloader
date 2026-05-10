@@ -10,10 +10,16 @@ from auth import CookieManager
 from config import ConfigLoader
 from control import QueueManager, RateLimiter, RetryHandler
 from core.api_client import DouyinAPIClient
+from core.metadata import extract_author_sec_uid
 from core.transcript_manager import TranscriptManager
 from storage import Database, FileManager, MetadataHandler
 from utils.logger import setup_logger
-from utils.validators import sanitize_filename
+from utils.naming import (
+    DEFAULT_FILE_TEMPLATE,
+    DEFAULT_FOLDER_TEMPLATE,
+    build_aweme_context,
+    render_template,
+)
 
 logger = setup_logger("BaseDownloader")
 
@@ -280,6 +286,8 @@ class BaseDownloader(ABC):
         author_name: str,
         mode: Optional[str] = None,
         incremental_scope: Optional[str] = None,
+        *,
+        db_batch: Optional[List[Dict[str, Any]]] = None,
     ) -> bool:
         aweme_id = aweme_data.get("aweme_id")
         if not aweme_id:
@@ -297,7 +305,33 @@ class BaseDownloader(ABC):
                 aweme_id,
                 publish_date,
             )
-        file_stem = sanitize_filename(f"{publish_date}_{desc}_{aweme_id}")
+        media_type = self._detect_media_type(aweme_data)
+        template_context = build_aweme_context(
+            aweme_id=str(aweme_id),
+            title=desc,
+            author_name=author_name,
+            author_sec_uid=extract_author_sec_uid(aweme_data),
+            publish_date=publish_date,
+            publish_ts=publish_ts,
+            media_type=media_type,
+            mode=mode,
+        )
+        filename_template = (
+            self.config.get("filename_template") or DEFAULT_FILE_TEMPLATE
+        )
+        folder_template = (
+            self.config.get("folder_template") or DEFAULT_FOLDER_TEMPLATE
+        )
+        file_stem = render_template(
+            filename_template,
+            template_context,
+            fallback=f"{publish_date}_{aweme_id}",
+        )
+        folder_name = render_template(
+            folder_template,
+            template_context,
+            fallback=f"{publish_date}_{aweme_id}",
+        )
 
         save_dir = self.file_manager.get_save_path(
             author_name=author_name,
@@ -306,13 +340,13 @@ class BaseDownloader(ABC):
             aweme_id=aweme_id,
             folderstyle=self.config.get("folderstyle", True),
             download_date=publish_date,
+            folder_name=folder_name,
         )
         downloaded_files: List[Path] = []
 
         session = await self.api_client.get_session()
         video_path: Optional[Path] = None
 
-        media_type = self._detect_media_type(aweme_data)
         if media_type == "video":
             video_info = self._build_no_watermark_url(aweme_data)
             if not video_info:
@@ -358,15 +392,15 @@ class BaseDownloader(ABC):
                         downloaded_files.append(music_path)
 
         elif media_type == "gallery":
-            image_urls = self._collect_image_urls(aweme_data)
+            image_url_candidates = self._collect_image_url_candidates(aweme_data)
             image_live_urls = self._collect_image_live_urls(aweme_data)
             logger.info(
                 "Gallery aweme %s: %d image(s), %d live photo(s)",
                 aweme_id,
-                len(image_urls),
+                len(image_url_candidates),
                 len(image_live_urls),
             )
-            if not image_urls and not image_live_urls:
+            if not image_url_candidates and not image_live_urls:
                 logger.error(
                     "No gallery assets found for aweme %s (aweme_type=%s, "
                     "has image_post_info=%s, has images=%s)",
@@ -377,25 +411,31 @@ class BaseDownloader(ABC):
                 )
                 return False
 
-            for index, image_url in enumerate(image_urls, start=1):
-                suffix = self._infer_image_extension(image_url)
-                image_path = save_dir / f"{file_stem}_{index}{suffix}"
-                download_result = await self._download_with_retry(
-                    image_url,
-                    image_path,
-                    session,
-                    headers=self._download_headers(),
-                    prefer_response_content_type=True,
-                    return_saved_path=True,
-                )
+            for index, candidates in enumerate(image_url_candidates, start=1):
+                download_result: bool | Path = False
+                for image_url in candidates:
+                    suffix = self._infer_image_extension(image_url)
+                    image_path = save_dir / f"{file_stem}_{index}{suffix}"
+                    download_result = await self._download_with_retry(
+                        image_url,
+                        image_path,
+                        session,
+                        headers=self._download_headers(),
+                        prefer_response_content_type=True,
+                        return_saved_path=True,
+                    )
+                    if download_result:
+                        downloaded_files.append(
+                            download_result
+                            if isinstance(download_result, Path)
+                            else image_path
+                        )
+                        break
                 if not download_result:
                     logger.error(
                         f"Failed downloading image {index} for aweme {aweme_id}"
                     )
                     return False
-                downloaded_files.append(
-                    download_result if isinstance(download_result, Path) else image_path
-                )
 
             for index, live_url in enumerate(image_live_urls, start=1):
                 suffix = Path(urlparse(live_url).path).suffix or ".mp4"
@@ -435,21 +475,46 @@ class BaseDownloader(ABC):
             if await self.metadata_handler.save_metadata(aweme_data, json_path):
                 downloaded_files.append(json_path)
 
+        comments_cfg = self.config.get("comments") or {}
+        if isinstance(comments_cfg, dict) and comments_cfg.get("enabled"):
+            from core.comments_collector import CommentsCollector
+
+            collector = CommentsCollector(
+                self.api_client,
+                self.metadata_handler,
+                include_replies=bool(comments_cfg.get("include_replies", False)),
+                max_comments=int(comments_cfg.get("max_comments", 0) or 0),
+                page_size=int(comments_cfg.get("page_size", 20) or 20),
+            )
+            comments_path = save_dir / f"{file_stem}_comments.json"
+            saved = await collector.collect_and_save(aweme_id, comments_path)
+            if saved is not None:
+                downloaded_files.append(comments_path)
+
         author = aweme_data.get("author", {})
         if self.database:
             metadata_json = json.dumps(aweme_data, ensure_ascii=False)
-            await self.database.add_aweme(
-                {
-                    "aweme_id": aweme_id,
-                    "aweme_type": media_type,
-                    "title": desc,
-                    "author_id": author.get("uid"),
-                    "author_name": author.get("nickname", author_name),
-                    "create_time": aweme_data.get("create_time"),
-                    "file_path": str(save_dir),
-                    "metadata": metadata_json,
-                }
-            )
+            record = {
+                "aweme_id": aweme_id,
+                "aweme_type": media_type,
+                "title": desc,
+                "author_id": author.get("uid"),
+                "author_name": author.get("nickname", author_name),
+                "create_time": aweme_data.get("create_time"),
+                "file_path": str(save_dir),
+                "metadata": metadata_json,
+                # Attach sec_uid onto the payload so both the batched path
+                # (add_aweme_batch iterates `record["author_sec_uid"]`) and
+                # the single-write path (add_aweme reads the payload as
+                # fallback when the kwarg is None) pick it up identically.
+                "author_sec_uid": extract_author_sec_uid(aweme_data),
+            }
+            # Caller may opt into batched DB writes by passing a list; we just
+            # accumulate the record and let the caller commit them all at once.
+            if db_batch is not None:
+                db_batch.append(record)
+            else:
+                await self.database.add_aweme(record)
         await self._update_incremental_state_for_aweme(
             aweme_data, incremental_scope=incremental_scope
         )
@@ -594,24 +659,40 @@ class BaseDownloader(ABC):
         self, aweme_data: Dict[str, Any]
     ) -> Optional[Tuple[str, Dict[str, str]]]:
         video = aweme_data.get("video", {})
-        play_addr = video.get("play_addr", {})
+        play_addr = self._pick_highest_quality_play_addr(video) or video.get(
+            "play_addr", {}
+        )
         url_candidates = [c for c in (play_addr.get("url_list") or []) if c]
         url_candidates.sort(key=lambda u: 0 if "watermark=0" in u else 1)
 
         fallback_candidate: Optional[Tuple[str, Dict[str, str]]] = None
+        watermarked_candidate: Optional[Tuple[str, Dict[str, str]]] = None
 
         for candidate in url_candidates:
             parsed = urlparse(candidate)
             headers = self._download_headers()
+            is_watermarked = self._is_watermarked_media_url(candidate)
 
             if parsed.netloc.endswith("douyin.com"):
                 if "X-Bogus=" not in candidate:
                     signed_url, ua = self.api_client.sign_url(candidate)
                     headers = self._download_headers(user_agent=ua)
+                    if is_watermarked:
+                        watermarked_candidate = watermarked_candidate or (
+                            signed_url,
+                            headers,
+                        )
+                        continue
                     return signed_url, headers
+                if is_watermarked:
+                    watermarked_candidate = watermarked_candidate or (candidate, headers)
+                    continue
                 return candidate, headers
 
-            fallback_candidate = (candidate, headers)
+            if is_watermarked:
+                watermarked_candidate = watermarked_candidate or (candidate, headers)
+            else:
+                fallback_candidate = fallback_candidate or (candidate, headers)
 
         # Prefer direct CDN URLs (e.g. douyinvod.com) over the /aweme/v1/play/
         # signed endpoint: the latter redirects to a URL that returns 403 Forbidden.
@@ -637,31 +718,74 @@ class BaseDownloader(ABC):
             )
             return signed_url, self._download_headers(user_agent=ua)
 
+        if watermarked_candidate:
+            return watermarked_candidate
+
         return None
 
+    @staticmethod
+    def _pick_highest_quality_play_addr(video: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """从 video.bit_rate 多档率中挑选最高码率的 play_addr。
+
+        Douyin 返回的 video.bit_rate 是按质量排序的字典列表，每项包含 bit_rate 与
+        play_addr。优先选 bit_rate 数字最大的那一档；若整个结构缺失则返回 None。
+        """
+        bit_rates = video.get("bit_rate") if isinstance(video, dict) else None
+        if not isinstance(bit_rates, list) or not bit_rates:
+            return None
+
+        best: Optional[Dict[str, Any]] = None
+        best_score = -1
+        for entry in bit_rates:
+            if not isinstance(entry, dict):
+                continue
+            play_addr = entry.get("play_addr")
+            if not isinstance(play_addr, dict):
+                continue
+            try:
+                bit_rate = int(entry.get("bit_rate") or 0)
+            except (TypeError, ValueError):
+                bit_rate = 0
+            # tie-breaker：同等码率时取更高分辨率
+            width = int(play_addr.get("width") or entry.get("width") or 0)
+            score = bit_rate * 10_000 + width
+            if score > best_score:
+                best_score = score
+                best = play_addr
+        return best
+
     def _collect_image_urls(self, aweme_data: Dict[str, Any]) -> List[str]:
+        return [
+            candidates[0]
+            for candidates in self._collect_image_url_candidates(aweme_data)
+            if candidates
+        ]
+
+    def _collect_image_url_candidates(self, aweme_data: Dict[str, Any]) -> List[List[str]]:
         image_urls = []
         gallery_items = self._iter_gallery_items(aweme_data)
         for item in gallery_items:
             if not isinstance(item, dict):
                 continue
-            image_url = self._pick_first_media_url(
+            candidates = self._collect_media_urls(
+                item.get("watermark_free_download_url_list"),
+                item,
+                item.get("origin_image"),
+                item.get("display_image"),
                 item.get("download_url"),
                 item.get("download_addr"),
                 item.get("download_url_list"),
-                item,
-                item.get("display_image"),
                 item.get("owner_watermark_image"),
             )
-            if image_url:
-                image_urls.append(image_url)
+            if candidates:
+                image_urls.append(candidates)
         if not image_urls:
             logger.warning(
                 "No image URLs extracted for aweme %s; gallery items count=%d",
                 aweme_data.get("aweme_id"),
                 len(gallery_items),
             )
-        return self._deduplicate_urls(image_urls)
+        return image_urls
 
     def _collect_image_live_urls(self, aweme_data: Dict[str, Any]) -> List[str]:
         live_urls: List[str] = []
@@ -669,7 +793,10 @@ class BaseDownloader(ABC):
             if not isinstance(item, dict):
                 continue
             video = item.get("video") if isinstance(item.get("video"), dict) else {}
+            # 实况图同样会有 bit_rate 多档，优先选最高清档的 play_addr。
+            preferred_play_addr = self._pick_highest_quality_play_addr(video)
             live_url = self._pick_first_media_url(
+                preferred_play_addr,
                 video.get("play_addr"),
                 video.get("download_addr"),
                 item.get("video_play_addr"),
@@ -712,20 +839,56 @@ class BaseDownloader(ABC):
         return None
 
     @staticmethod
+    def _collect_media_urls(*sources: Any) -> List[str]:
+        urls: List[str] = []
+        seen: set[str] = set()
+        for source in sources:
+            for candidate in sorted(
+                BaseDownloader._extract_urls(source),
+                key=BaseDownloader._media_url_priority,
+            ):
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                urls.append(candidate)
+        return urls
+
+    @staticmethod
+    def _media_url_priority(url: str) -> int:
+        normalized = url.lower()
+        path = (urlparse(url).path or "").lower()
+        score = 100 if BaseDownloader._is_watermarked_media_url(normalized) else 0
+        return score + (1 if ".webp" in path else 0)
+
+    @staticmethod
+    def _is_watermarked_media_url(url: str) -> bool:
+        normalized = url.lower()
+        watermark_hints = (
+            "tplv-dy-water",
+            "dy-water",
+            "owner_watermark",
+            "watermark_image",
+            "watermark=1",
+            "playwm",
+        )
+        return any(hint in normalized for hint in watermark_hints)
+
+    @staticmethod
     def _extract_first_url(source: Any) -> Optional[str]:
+        urls = BaseDownloader._extract_urls(source)
+        return urls[0] if urls else None
+
+    @staticmethod
+    def _extract_urls(source: Any) -> List[str]:
         if isinstance(source, dict):
-            url_list = source.get("url_list")
+            url_list = source.get("url_list") or source.get("urlList")
             if isinstance(url_list, list) and url_list:
-                first_item = url_list[0]
-                if isinstance(first_item, str) and first_item:
-                    return first_item
+                return [item for item in url_list if isinstance(item, str) and item]
         elif isinstance(source, list) and source:
-            first_item = source[0]
-            if isinstance(first_item, str) and first_item:
-                return first_item
+            return [item for item in source if isinstance(item, str) and item]
         elif isinstance(source, str) and source:
-            return source
-        return None
+            return [source]
+        return []
 
     @staticmethod
     def _infer_image_extension(image_url: str) -> str:

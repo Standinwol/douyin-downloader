@@ -5,6 +5,7 @@ from config import ConfigLoader
 from control import QueueManager, RateLimiter, RetryHandler
 from core.api_client import DouyinAPIClient
 from core.downloader_base import BaseDownloader
+from core.live_downloader import LiveDownloader
 from core.mix_downloader import MixDownloader
 from core.music_downloader import MusicDownloader
 from core.user_downloader import UserDownloader
@@ -52,6 +53,14 @@ class DownloaderFactory:
             return MixDownloader(**common_args)
         elif url_type == 'music':
             return MusicDownloader(**common_args)
+        elif url_type == 'live':
+            return LiveDownloader(**common_args)
+        elif url_type == 'short':
+            logger.error(
+                "Short URL was not resolved before dispatching. "
+                "Please call api_client.resolve_short_url() first."
+            )
+            return None
         else:
             logger.error("Unsupported URL type: %s", url_type)
             return None
