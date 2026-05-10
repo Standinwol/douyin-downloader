@@ -1,4 +1,5 @@
 from gui_app.app import (
+    build_worker_command,
     build_worker_request,
     describe_skipped_target,
     describe_success_target,
@@ -95,6 +96,40 @@ def test_detect_worker_python_prefers_local_venv(tmp_path):
 
     detected = detect_worker_python(project_root=project_root, current_executable="C:/Python/python.exe")
     assert detected == str(local_python)
+
+
+def test_build_worker_command_uses_module_for_source_runtime(tmp_path):
+    request_file = tmp_path / "request.json"
+    command = build_worker_command(
+        python_executable="C:/Python/python.exe",
+        request_file=request_file,
+        frozen=False,
+    )
+
+    assert command == [
+        "C:/Python/python.exe",
+        "-m",
+        "engine_api.worker",
+        "--request-file",
+        str(request_file),
+    ]
+
+
+def test_build_worker_command_reuses_frozen_executable(tmp_path):
+    request_file = tmp_path / "request.json"
+    command = build_worker_command(
+        python_executable="",
+        request_file=request_file,
+        frozen=True,
+        current_executable="C:/Apps/DouyinDownloader.exe",
+    )
+
+    assert command == [
+        "C:\\Apps\\DouyinDownloader.exe",
+        "--worker",
+        "--request-file",
+        str(request_file),
+    ]
 
 
 def test_build_worker_request_maps_gui_flags():

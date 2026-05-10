@@ -102,6 +102,27 @@ docker build -t douyin-downloader .
 docker run -v $(pwd)/config.yml:/app/config.yml -v $(pwd)/Downloaded:/app/Downloaded douyin-downloader
 ```
 
+### 6) Build a portable desktop app (optional)
+
+The source GUI shows a `Worker Python` field because it launches the downloader
+worker with `python -m engine_api.worker` while you are developing from source.
+The packaged desktop app does not need that field: it relaunches the same exe as
+`DouyinDownloader.exe --worker ...`, so end users do not need Python installed.
+
+```bash
+python -m pip install .[desktop]
+python -m tools.build_desktop
+```
+
+The Windows build is written to:
+
+```text
+dist/DouyinDownloader.exe
+```
+
+Place `config.yml` next to the exe if you want the GUI to auto-load cookies.
+Downloads default to a `Downloaded` folder next to the exe.
+
 ## Minimal Working Config
 
 ```yaml

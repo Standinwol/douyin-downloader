@@ -11,7 +11,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from config import ConfigLoader
 from utils.cookie_utils import parse_cookie_header, sanitize_cookies
@@ -19,8 +19,21 @@ from utils.cookie_utils import parse_cookie_header, sanitize_cookies
 APP_TITLE = "Douyin Downloader Desktop"
 DEFAULT_WINDOW_SIZE = "1180x780"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "Downloaded"
-DEFAULT_STATE_PATH = PROJECT_ROOT / ".gui-state.json"
+
+
+def is_frozen_app() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def get_app_base_dir() -> Path:
+    if is_frozen_app():
+        return Path(sys.executable).resolve().parent
+    return PROJECT_ROOT
+
+
+APP_BASE_DIR = get_app_base_dir()
+DEFAULT_OUTPUT_DIR = APP_BASE_DIR / "Downloaded"
+DEFAULT_STATE_PATH = APP_BASE_DIR / ".gui-state.json"
 
 
 def describe_success_target(response: Dict[str, Any]) -> str:
@@ -65,6 +78,9 @@ def detect_worker_python(
     project_root: Path = PROJECT_ROOT,
     current_executable: Optional[str] = None,
 ) -> str:
+    if is_frozen_app():
+        return str(Path(current_executable or sys.executable).resolve())
+
     local_venv_python = project_root / ".venv" / "Scripts" / "python.exe"
     if local_venv_python.exists():
         return str(local_venv_python)
@@ -74,6 +90,33 @@ def detect_worker_python(
         return current
 
     return "python"
+
+
+def build_worker_command(
+    *,
+    python_executable: str,
+    request_file: Path,
+    frozen: Optional[bool] = None,
+    current_executable: Optional[str] = None,
+) -> List[str]:
+    if frozen is None:
+        frozen = is_frozen_app()
+
+    if frozen:
+        return [
+            str(Path(current_executable or sys.executable).resolve()),
+            "--worker",
+            "--request-file",
+            str(request_file),
+        ]
+
+    return [
+        normalize_python_executable(python_executable),
+        "-m",
+        "engine_api.worker",
+        "--request-file",
+        str(request_file),
+    ]
 
 
 def parse_cookie_text(raw_text: str) -> Dict[str, str]:
@@ -131,14 +174,14 @@ def build_worker_request(
     }
 
 
-def default_cookie_paths(project_root: Path = PROJECT_ROOT) -> Iterable[Path]:
+def default_cookie_paths(project_root: Path = APP_BASE_DIR) -> Iterable[Path]:
     return (
         project_root / "config" / "cookies.json",
         project_root / ".cookies.json",
     )
 
 
-def default_config_paths(project_root: Path = PROJECT_ROOT) -> Iterable[Path]:
+def default_config_paths(project_root: Path = APP_BASE_DIR) -> Iterable[Path]:
     return (
         project_root / "config.yml",
         project_root / "config.yaml",
@@ -170,7 +213,7 @@ def load_cookie_text_from_path(path: Path) -> str:
         return ""
 
 
-def load_default_cookie_text(project_root: Path = PROJECT_ROOT) -> Tuple[str, str]:
+def load_default_cookie_text(project_root: Path = APP_BASE_DIR) -> Tuple[str, str]:
     for path in default_config_paths(project_root):
         if not path.exists():
             continue
@@ -308,10 +351,15 @@ class DouyinDownloaderApp:
         ttk.Entry(frame, textvariable=self.output_dir_var).grid(row=1, column=1, sticky="ew")
         ttk.Button(frame, text="Browse...", command=self._choose_output_dir).grid(row=1, column=2, padx=(8, 0))
 
-        ttk.Label(frame, text="Worker Python", style="App.TLabel").grid(row=2, column=0, sticky="w", pady=(10, 0))
-        python_entry = ttk.Entry(frame, textvariable=self.python_var)
-        python_entry.grid(row=2, column=1, sticky="ew", pady=(10, 0))
-        ttk.Button(frame, text="Detect", command=self._reset_python_path).grid(row=2, column=2, padx=(8, 0), pady=(10, 0))
+        if not is_frozen_app():
+            ttk.Label(frame, text="Worker Python", style="App.TLabel").grid(
+                row=2, column=0, sticky="w", pady=(10, 0)
+            )
+            python_entry = ttk.Entry(frame, textvariable=self.python_var)
+            python_entry.grid(row=2, column=1, sticky="ew", pady=(10, 0))
+            ttk.Button(frame, text="Detect", command=self._reset_python_path).grid(
+                row=2, column=2, padx=(8, 0), pady=(10, 0)
+            )
 
         return frame
 
@@ -532,7 +580,7 @@ class DouyinDownloaderApp:
         if not output_dir:
             messagebox.showerror("Missing output folder", "Choose where the downloaded files should be stored.")
             return
-        if not python_executable:
+        if not is_frozen_app() and not python_executable:
             messagebox.showerror("Missing Python", "The worker Python executable could not be determined.")
             return
 
@@ -583,18 +631,15 @@ class DouyinDownloaderApp:
             json.dump(request_payload, request_file, ensure_ascii=False, indent=2)
         self.worker_request_file = Path(request_file.name)
 
-        command = [
-            python_executable,
-            "-m",
-            "engine_api.worker",
-            "--request-file",
-            str(self.worker_request_file),
-        ]
+        command = build_worker_command(
+            python_executable=python_executable,
+            request_file=self.worker_request_file,
+        )
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
             self.worker_process = subprocess.Popen(
                 command,
-                cwd=str(PROJECT_ROOT),
+                cwd=str(APP_BASE_DIR if is_frozen_app() else PROJECT_ROOT),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,

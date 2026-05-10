@@ -49,14 +49,17 @@ dev = [
     "ruff>=0.4.0",
     "httpx>=0.25",
 ]
+desktop = [
+    "pyinstaller>=6.0",
+]
 all = [
-    "douyin-downloader[browser,transcribe,server,dev]",
+    "douyin-downloader[browser,transcribe,server,dev,desktop]",
 ]
 
 [project.scripts]
 douyin-dl = "cli.main:main"
 douyin-engine-worker = "engine_api.worker:main"
-douyin-gui = "gui_app.app:main"
+douyin-gui = "gui_app.launcher:main"
 
 [tool.setuptools.packages.find]
 include = ["cli*", "core*", "auth*", "config*", "control*", "storage*", "utils*", "tools*", "engine_api*", "gui_app*", "server*"]
