@@ -10,6 +10,15 @@ def test_parse_video_url():
     assert parsed['aweme_id'] == '7320876060210373923'
 
 
+def test_parse_jingxuan_modal_id_url_as_video():
+    url = "https://www.douyin.com/jingxuan?modal_id=7625331712263736628"
+    parsed = URLParser.parse(url)
+
+    assert parsed is not None
+    assert parsed["type"] == "video"
+    assert parsed["aweme_id"] == "7625331712263736628"
+
+
 def test_parse_gallery_url_sets_aweme_id():
     url = "https://www.douyin.com/note/7320876060210373923"
     parsed = URLParser.parse(url)

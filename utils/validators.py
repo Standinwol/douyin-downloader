@@ -1,6 +1,6 @@
 import re
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 def validate_url(url: str) -> bool:
@@ -85,4 +85,10 @@ def parse_url_type(url: str) -> Optional[str]:
         return 'music'
     if '/live/' in path or '/follow/live/' in path:
         return 'live'
+
+    query = parse_qs(parsed.query)
+    modal_ids = query.get("modal_id") or []
+    if modal_ids and re.fullmatch(r"\d+", str(modal_ids[0] or "")):
+        return "video"
+
     return None
