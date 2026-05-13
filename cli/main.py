@@ -16,6 +16,24 @@ from utils.logger import set_console_log_level, setup_logger
 from utils.notifier import build_notifier
 from utils.validators import is_short_url, normalize_short_url
 
+
+def _ensure_utf8_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not reconfigure:
+            continue
+        encoding = getattr(stream, "encoding", None) or ""
+        normalized = encoding.replace("-", "").replace("_", "").lower()
+        if normalized in {"utf8", "utf8sig"}:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (LookupError, OSError, ValueError):
+            pass
+
+
+_ensure_utf8_stdio()
+
 logger = setup_logger("CLI")
 display = ProgressDisplay()
 
@@ -335,6 +353,7 @@ async def _dispatch_notifications(config: ConfigLoader, total_result: Any, url_c
 
 
 def main():
+    _ensure_utf8_stdio()
     parser = argparse.ArgumentParser(description="Douyin Downloader - 抖音批量下载工具")
     parser.add_argument("-u", "--url", action="append", help="Download URL(s)")
     parser.add_argument("-c", "--config", help="Config file path (default: config.yml)")

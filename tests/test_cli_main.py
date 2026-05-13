@@ -32,6 +32,41 @@ class _FakeDownloader:
         return SimpleNamespace(total=1, success=1, failed=0, skipped=0, parsed=parsed)
 
 
+class _FakeStream:
+    def __init__(self, encoding):
+        self.encoding = encoding
+        self.reconfigured = None
+
+    def reconfigure(self, **kwargs):
+        self.reconfigured = kwargs
+
+
+def test_ensure_utf8_stdio_reconfigures_legacy_console_streams(monkeypatch):
+    stdout = _FakeStream("cp1252")
+    stderr = _FakeStream(None)
+
+    monkeypatch.setattr(main_module.sys, "stdout", stdout)
+    monkeypatch.setattr(main_module.sys, "stderr", stderr)
+
+    main_module._ensure_utf8_stdio()
+
+    assert stdout.reconfigured == {"encoding": "utf-8"}
+    assert stderr.reconfigured == {"encoding": "utf-8"}
+
+
+def test_ensure_utf8_stdio_leaves_utf8_streams_alone(monkeypatch):
+    stdout = _FakeStream("utf-8")
+    stderr = _FakeStream("UTF_8")
+
+    monkeypatch.setattr(main_module.sys, "stdout", stdout)
+    monkeypatch.setattr(main_module.sys, "stderr", stderr)
+
+    main_module._ensure_utf8_stdio()
+
+    assert stdout.reconfigured is None
+    assert stderr.reconfigured is None
+
+
 @pytest.mark.asyncio
 async def test_download_url_resolves_short_link_before_parsing(monkeypatch, tmp_path):
     config = main_module.ConfigLoader()

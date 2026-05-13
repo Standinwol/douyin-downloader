@@ -37,6 +37,24 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
+
+def _ensure_utf8_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not reconfigure:
+            continue
+        encoding = getattr(stream, "encoding", None) or ""
+        normalized = encoding.replace("-", "").replace("_", "").lower()
+        if normalized in {"utf8", "utf8sig"}:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (LookupError, OSError, ValueError):
+            pass
+
+
+_ensure_utf8_stdio()
+
 console = Console()
 
 # ── 颜色主题 (区别于 douyin-downloader 的 cyan/magenta) ──

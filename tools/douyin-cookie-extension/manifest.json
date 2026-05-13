@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Douyin Cookie Exporter",
+  "version": "1.0.0",
+  "description": "Export douyin.com cookies as a header string or JSON for Douyin Downloader.",
+  "permissions": [
+    "cookies",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "https://douyin.com/*",
+    "https://*.douyin.com/*"
+  ],
+  "action": {
+    "default_title": "Douyin Cookies",
+    "default_popup": "popup.html"
+  }
+}

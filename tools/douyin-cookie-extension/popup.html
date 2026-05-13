@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Douyin Cookies</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="header">
+      <h1>Douyin Cookies</h1>
+      <p>Doc cookie tu douyin.com va copy dung format cho Douyin Downloader.</p>
+    </header>
+
+    <section class="controls" aria-label="Cookie controls">
+      <button id="refreshBtn" type="button">Refresh</button>
+      <button id="recommendedBtn" type="button">Recommended</button>
+      <button id="allBtn" type="button">All</button>
+    </section>
+
+    <section class="summary" aria-live="polite">
+      <div id="statusText">Dang tai cookie...</div>
+      <div id="missingText" class="missing"></div>
+    </section>
+
+    <label class="field">
+      <span>Cookie header</span>
+      <textarea id="headerOutput" rows="7" spellcheck="false" readonly></textarea>
+    </label>
+
+    <section class="copy-row">
+      <button id="copyHeaderBtn" type="button">Copy header</button>
+      <button id="copyJsonBtn" type="button">Copy JSON</button>
+    </section>
+
+    <label class="field">
+      <span>JSON</span>
+      <textarea id="jsonOutput" rows="8" spellcheck="false" readonly></textarea>
+    </label>
+
+    <footer class="footer">
+      Cookie la phien dang nhap. Khong gui cho nguoi khac.
+    </footer>
+  </main>
+  <script src="popup.js" defer></script>
+</body>
+</html>

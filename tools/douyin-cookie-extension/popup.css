@@ -1,0 +1,101 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 14px;
+  color: #202124;
+  background: #f7f8fa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 430px;
+  margin: 0;
+  background: #f7f8fa;
+}
+
+.shell {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.header h1 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.header p,
+.footer {
+  margin: 0;
+  color: #5f6368;
+  line-height: 1.35;
+}
+
+.controls,
+.copy-row {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  border: 1px solid #c9d1dc;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #202124;
+  cursor: pointer;
+  font: inherit;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+button:hover {
+  background: #eef3fb;
+  border-color: #9fb7d9;
+}
+
+button:active {
+  background: #dce9fb;
+}
+
+.summary {
+  border: 1px solid #e0e4ea;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 9px 10px;
+  line-height: 1.35;
+}
+
+.missing {
+  color: #b3261e;
+  margin-top: 4px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field span {
+  font-weight: 600;
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #c9d1dc;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #202124;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 8px;
+}
+
+.footer {
+  font-size: 12px;
+}
