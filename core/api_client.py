@@ -23,23 +23,11 @@ logger = setup_logger("APIClient")
 _USER_AGENT_POOL = [
     (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
     ),
     (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    ),
-    (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-    ),
-    (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-    ),
-    (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) "
-        "Gecko/20100101 Firefox/133.0"
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
     ),
 ]
 
@@ -70,18 +58,15 @@ class DouyinAPIClient:
         selected_ua = random.choice(_USER_AGENT_POOL)
         self.headers = {
             "User-Agent": selected_ua,
-            "Referer": "https://www.douyin.com/",
-            "Accept": "application/json",
+            "Referer": "https://www.douyin.com/?recommend=1",
+            "Accept": "*/*",
             "Accept-Encoding": "gzip, deflate",
             "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Connection": "keep-alive",
         }
         self._signer = XBogus(self.headers["User-Agent"])
         self._ms_token_manager = MsTokenManager(user_agent=self.headers["User-Agent"])
         self._ms_token = (self.cookies.get("msToken") or "").strip()
-        self._abogus_enabled = (
-            ABogus is not None and BrowserFingerprintGenerator is not None
-        )
+        self._abogus_enabled = ABogus is not None and BrowserFingerprintGenerator is not None
 
     async def __aenter__(self) -> "DouyinAPIClient":
         await self._ensure_session()
@@ -132,26 +117,30 @@ class DouyinAPIClient:
             "channel": "channel_pc_web",
             "update_version_code": "170400",
             "pc_client_type": "1",
+            "pc_libra_divert": "Windows",
             "version_code": "290100",
             "version_name": "29.1.0",
             "cookie_enabled": "true",
-            "screen_width": "1920",
-            "screen_height": "1080",
+            "screen_width": "1536",
+            "screen_height": "864",
             "browser_language": "zh-CN",
             "browser_platform": "Win32",
             "browser_name": "Chrome",
-            "browser_version": "130.0.0.0",
+            "browser_version": "139.0.0.0",
             "browser_online": "true",
             "engine_name": "Blink",
-            "engine_version": "130.0.0.0",
+            "engine_version": "139.0.0.0",
             "os_name": "Windows",
             "os_version": "10",
-            "cpu_core_num": "12",
+            "cpu_core_num": "16",
             "device_memory": "8",
             "platform": "PC",
             "downlink": "10",
             "effective_type": "4g",
-            "round_trip_time": "100",
+            "round_trip_time": "200",
+            "support_h265": "1",
+            "support_dash": "1",
+            "uifid": "",
             "msToken": ms_token,
         }
 
@@ -172,7 +161,7 @@ class DouyinAPIClient:
             return None
 
         try:
-            browser_fp = BrowserFingerprintGenerator.generate_fingerprint("Edge")
+            browser_fp = BrowserFingerprintGenerator.generate_fingerprint("Chrome")
             signer = ABogus(fp=browser_fp, user_agent=self.headers["User-Agent"])
             params_with_ab, _ab, ua, _body = signer.generate_abogus(query, "")
             return f"{base_url}?{params_with_ab}", ua
@@ -201,7 +190,36 @@ class DouyinAPIClient:
                     proxy=self.proxy or None,
                 ) as response:
                     if response.status == 200:
-                        data = await response.json(content_type=None)
+                        body = await response.read()
+                        if not body:
+                            # Empty 200 response is a common anti-bot signal
+                            # from Douyin. Retry with a fresh signature.
+                            logger.warning(
+                                "Empty 200 response for %s (attempt %d/%d), "
+                                "likely anti-bot; will retry",
+                                path,
+                                attempt + 1,
+                                max_retries,
+                            )
+                            last_exc = RuntimeError(f"Empty 200 response for {path} (anti-bot)")
+                            if attempt < max_retries - 1:
+                                delay = delays[min(attempt, len(delays) - 1)]
+                                await asyncio.sleep(delay)
+                            continue
+                        try:
+                            data = await response.json(content_type=None)
+                        except Exception:
+                            import json as _json
+
+                            try:
+                                data = _json.loads(body)
+                            except Exception:
+                                logger.warning(
+                                    "Non-JSON 200 response for %s, length=%d",
+                                    path,
+                                    len(body),
+                                )
+                                return {}
                         return data if isinstance(data, dict) else {}
                     if response.status < 500 and response.status != 429:
                         log_fn = logger.debug if suppress_error else logger.error
@@ -211,9 +229,7 @@ class DouyinAPIClient:
                             response.status,
                         )
                         return {}
-                    last_exc = RuntimeError(
-                        f"HTTP {response.status} for {path}"
-                    )
+                    last_exc = RuntimeError(f"HTTP {response.status} for {path}")
             except Exception as exc:
                 last_exc = exc
 
@@ -221,7 +237,10 @@ class DouyinAPIClient:
                 delay = delays[min(attempt, len(delays) - 1)]
                 logger.debug(
                     "Request retry %d/%d for %s in %ds",
-                    attempt + 1, max_retries, path, delay,
+                    attempt + 1,
+                    max_retries,
+                    path,
+                    delay,
                 )
                 await asyncio.sleep(delay)
 
@@ -351,7 +370,7 @@ class DouyinAPIClient:
         return None
 
     async def get_user_post(
-        self, sec_uid: str, max_cursor: int = 0, count: int = 20
+        self, sec_uid: str, max_cursor: int = 0, count: int = 18
     ) -> Dict[str, Any]:
         params = await self._build_user_page_params(sec_uid, max_cursor, count)
         params.update(
@@ -388,9 +407,7 @@ class DouyinAPIClient:
         raw = await self._request_json("/aweme/v1/web/music/list/", params)
         return self._normalize_paged_response(raw, item_keys=["music_list"])
 
-    async def _build_collect_page_params(
-        self, max_cursor: int, count: int
-    ) -> Dict[str, Any]:
+    async def _build_collect_page_params(self, max_cursor: int, count: int) -> Dict[str, Any]:
         params = await self._default_query()
         params.update(
             {
@@ -407,9 +424,7 @@ class DouyinAPIClient:
     ) -> Dict[str, Any]:
         if sec_uid and sec_uid != "self":
             logger.warning("Collect folders currently require self sec_uid, got=%s", sec_uid)
-            return self._normalize_paged_response(
-                {}, item_keys=["collects_list"], source="api"
-            )
+            return self._normalize_paged_response({}, item_keys=["collects_list"], source="api")
 
         params = await self._build_collect_page_params(max_cursor, count)
         raw = await self._request_json("/aweme/v1/web/collects/list/", params)
@@ -428,9 +443,7 @@ class DouyinAPIClient:
     ) -> Dict[str, Any]:
         if sec_uid and sec_uid != "self":
             logger.warning("Collect mix currently require self sec_uid, got=%s", sec_uid)
-            return self._normalize_paged_response(
-                {}, item_keys=["mix_infos"], source="api"
-            )
+            return self._normalize_paged_response({}, item_keys=["mix_infos"], source="api")
 
         params = await self._build_collect_page_params(max_cursor, count)
         raw = await self._request_json("/aweme/v1/web/mix/listcollection/", params)
@@ -453,9 +466,7 @@ class DouyinAPIClient:
             return None
         return data.get("mix_info") or data.get("mix_detail") or data
 
-    async def get_mix_aweme(
-        self, mix_id: str, cursor: int = 0, count: int = 20
-    ) -> Dict[str, Any]:
+    async def get_mix_aweme(self, mix_id: str, cursor: int = 0, count: int = 20) -> Dict[str, Any]:
         params = await self._default_query()
         params.update({"mix_id": mix_id, "cursor": cursor, "count": count})
         raw = await self._request_json("/aweme/v1/web/mix/aweme/", params)
@@ -677,9 +688,7 @@ class DouyinAPIClient:
                     )
                     comment["_replies"] = reply_page.get("items") or []
                 except Exception as exc:  # noqa: BLE001
-                    logger.debug(
-                        "Fetch reply for comment %s failed: %s", comment_id, exc
-                    )
+                    logger.debug("Fetch reply for comment %s failed: %s", comment_id, exc)
         return normalized
 
     async def get_aweme_comment_replies(
@@ -754,9 +763,7 @@ class DouyinAPIClient:
         try:
             from playwright.async_api import async_playwright
         except Exception as exc:
-            logger.warning(
-                "Playwright not available, browser fallback disabled: %s", exc
-            )
+            logger.warning("Playwright not available, browser fallback disabled: %s", exc)
             return []
 
         target_url = f"{self.BASE_URL}/user/{sec_uid}"
@@ -832,17 +839,13 @@ class DouyinAPIClient:
                             post_api_ids.append(aweme_id)
 
             def _on_response(response):
-                pending_response_tasks.append(
-                    asyncio.create_task(_handle_response(response))
-                )
+                pending_response_tasks.append(asyncio.create_task(_handle_response(response)))
 
             page.on("response", _on_response)
 
             try:
                 try:
-                    await page.goto(
-                        target_url, wait_until="domcontentloaded", timeout=timeout_ms
-                    )
+                    await page.goto(target_url, wait_until="domcontentloaded", timeout=timeout_ms)
                 except Exception as exc:
                     logger.warning(
                         "Browser goto timeout or error, continue with current page state: %s",
@@ -861,9 +864,7 @@ class DouyinAPIClient:
                             "请将 browser_fallback.headless 设为 false。"
                         )
                         return []
-                    logger.warning(
-                        "检测到验证码页面，请在浏览器中完成验证，程序会自动继续采集。"
-                    )
+                    logger.warning("检测到验证码页面，请在浏览器中完成验证，程序会自动继续采集。")
                     await self._wait_for_manual_verification(
                         page, wait_timeout_seconds=wait_timeout_seconds
                     )
@@ -875,9 +876,7 @@ class DouyinAPIClient:
                                 timeout=timeout_ms,
                             )
                         except Exception as exc:
-                            logger.warning(
-                                "Reload user page after verification failed: %s", exc
-                            )
+                            logger.warning("Reload user page after verification failed: %s", exc)
 
                 try:
                     warmup_seconds = min(20, max(3, int(wait_timeout_seconds)))
@@ -919,9 +918,7 @@ class DouyinAPIClient:
                     )
             finally:
                 if pending_response_tasks:
-                    await asyncio.gather(
-                        *pending_response_tasks, return_exceptions=True
-                    )
+                    await asyncio.gather(*pending_response_tasks, return_exceptions=True)
                 try:
                     browser_cookies = await context.cookies(self.BASE_URL)
                     self._sync_browser_cookies(browser_cookies)
@@ -1020,12 +1017,8 @@ class DouyinAPIClient:
             logger.debug("Extract aweme_id from page failed: %s", exc)
         return []
 
-    async def _wait_for_manual_verification(
-        self, page, *, wait_timeout_seconds: int
-    ) -> None:
-        deadline = asyncio.get_running_loop().time() + max(
-            30, int(wait_timeout_seconds)
-        )
+    async def _wait_for_manual_verification(self, page, *, wait_timeout_seconds: int) -> None:
+        deadline = asyncio.get_running_loop().time() + max(30, int(wait_timeout_seconds))
         while asyncio.get_running_loop().time() < deadline:
             if page.is_closed():
                 logger.warning("Browser page closed while waiting manual verification")
@@ -1040,9 +1033,7 @@ class DouyinAPIClient:
                 return
             await page.wait_for_timeout(1000)
 
-        logger.warning(
-            "等待手动验证超时（%ss），继续按当前页面状态采集。", wait_timeout_seconds
-        )
+        logger.warning("等待手动验证超时（%ss），继续按当前页面状态采集。", wait_timeout_seconds)
 
     def _sync_browser_cookies(self, browser_cookies: List[Dict[str, Any]]) -> None:
         merged: Dict[str, str] = {}

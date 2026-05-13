@@ -35,9 +35,7 @@ async def test_downloader_factory_routes_supported_types(tmp_path):
         assert isinstance(DownloaderFactory.create("video", **common), VideoDownloader)
         assert isinstance(DownloaderFactory.create("gallery", **common), VideoDownloader)
         assert isinstance(DownloaderFactory.create("user", **common), UserDownloader)
-        assert isinstance(
-            DownloaderFactory.create("collection", **common), MixDownloader
-        )
+        assert isinstance(DownloaderFactory.create("collection", **common), MixDownloader)
         assert isinstance(DownloaderFactory.create("music", **common), MusicDownloader)
     finally:
         await api_client.close()

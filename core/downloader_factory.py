@@ -13,7 +13,7 @@ from core.video_downloader import VideoDownloader
 from storage import Database, FileManager
 from utils.logger import setup_logger
 
-logger = setup_logger('DownloaderFactory')
+logger = setup_logger("DownloaderFactory")
 
 
 class DownloaderFactory:
@@ -32,30 +32,30 @@ class DownloaderFactory:
     ) -> Optional[BaseDownloader]:
 
         common_args = {
-            'config': config,
-            'api_client': api_client,
-            'file_manager': file_manager,
-            'cookie_manager': cookie_manager,
-            'database': database,
-            'rate_limiter': rate_limiter,
-            'retry_handler': retry_handler,
-            'queue_manager': queue_manager,
-            'progress_reporter': progress_reporter,
+            "config": config,
+            "api_client": api_client,
+            "file_manager": file_manager,
+            "cookie_manager": cookie_manager,
+            "database": database,
+            "rate_limiter": rate_limiter,
+            "retry_handler": retry_handler,
+            "queue_manager": queue_manager,
+            "progress_reporter": progress_reporter,
         }
 
-        if url_type == 'video':
+        if url_type == "video":
             return VideoDownloader(**common_args)
-        elif url_type == 'user':
+        elif url_type == "user":
             return UserDownloader(**common_args)
-        elif url_type == 'gallery':
+        elif url_type == "gallery":
             return VideoDownloader(**common_args)
-        elif url_type == 'collection':
+        elif url_type == "collection":
             return MixDownloader(**common_args)
-        elif url_type == 'music':
+        elif url_type == "music":
             return MusicDownloader(**common_args)
-        elif url_type == 'live':
+        elif url_type == "live":
             return LiveDownloader(**common_args)
-        elif url_type == 'short':
+        elif url_type == "short":
             logger.error(
                 "Short URL was not resolved before dispatching. "
                 "Please call api_client.resolve_short_url() first."

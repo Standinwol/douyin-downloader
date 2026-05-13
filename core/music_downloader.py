@@ -80,9 +80,7 @@ class MusicDownloader(BaseDownloader):
             or f"music_{music_id}"
         )
         author_name = (
-            detail.get("author_name")
-            or (detail.get("owner") or {}).get("nickname")
-            or "music"
+            detail.get("author_name") or (detail.get("owner") or {}).get("nickname") or "music"
         )
         publish_date = datetime.now().strftime("%Y-%m-%d")
         record_id = f"music_{music_id}"
@@ -92,12 +90,8 @@ class MusicDownloader(BaseDownloader):
             author_name=author_name,
             publish_date=publish_date,
         )
-        filename_template = (
-            self.config.get("filename_template") or DEFAULT_FILE_TEMPLATE
-        )
-        folder_template = (
-            self.config.get("folder_template") or DEFAULT_FOLDER_TEMPLATE
-        )
+        filename_template = self.config.get("filename_template") or DEFAULT_FILE_TEMPLATE
+        folder_template = self.config.get("folder_template") or DEFAULT_FOLDER_TEMPLATE
         file_stem = render_template(
             filename_template,
             template_context,
@@ -117,6 +111,8 @@ class MusicDownloader(BaseDownloader):
             folderstyle=self.config.get("folderstyle", True),
             download_date=publish_date,
             folder_name=folder_name,
+            author_sec_uid=None,
+            author_dir_style=self.config.get("author_dir") or "nickname",
         )
 
         music_ext = self._infer_audio_extension(music_url)

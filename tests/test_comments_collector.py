@@ -14,9 +14,7 @@ class _FakeAPIClient:
         self._pages = list(pages)
         self.call_count = 0
 
-    async def get_aweme_comments(
-        self, aweme_id, *, cursor, count, include_replies
-    ):
+    async def get_aweme_comments(self, aweme_id, *, cursor, count, include_replies):
         self.call_count += 1
         if not self._pages:
             return {"items": [], "has_more": False, "max_cursor": cursor}

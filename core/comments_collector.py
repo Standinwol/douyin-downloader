@@ -40,9 +40,7 @@ class CommentsCollector:
         self.page_size = max(1, int(page_size or 20))
         self.retry_delay_seconds = float(retry_delay_seconds or 1.0)
 
-    async def collect_and_save(
-        self, aweme_id: str, output_path: Path
-    ) -> Optional[Dict[str, Any]]:
+    async def collect_and_save(self, aweme_id: str, output_path: Path) -> Optional[Dict[str, Any]]:
         """抓取评论并写入 output_path，失败时返回 None。"""
         comments = await self.collect(aweme_id)
         if comments is None:
@@ -57,9 +55,7 @@ class CommentsCollector:
         # MetadataHandler.save_metadata 内部已吞异常并返回 bool
         saved = await self.metadata_handler.save_metadata(payload, output_path)
         if not saved:
-            logger.warning(
-                "Failed to save comments for %s to %s", aweme_id, output_path
-            )
+            logger.warning("Failed to save comments for %s to %s", aweme_id, output_path)
             return None
         return payload
 

@@ -118,9 +118,7 @@ async def search_and_dump(
     safe_keyword = "".join(c if c.isalnum() else "_" for c in keyword)[:40] or "query"
     out_path = output_dir / "search" / f"{safe_keyword}_{ts}.jsonl"
     await _write_jsonl(out_path, accumulated)
-    logger.info(
-        "Search '%s' saved: %s items -> %s", keyword, len(accumulated), out_path
-    )
+    logger.info("Search '%s' saved: %s items -> %s", keyword, len(accumulated), out_path)
     return {
         "keyword": keyword,
         "items": accumulated,

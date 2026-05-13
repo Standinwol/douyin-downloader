@@ -40,9 +40,7 @@ class BaseUserModeStrategy(ABC):
             incremental_scope=incremental_scope,
         )
 
-    async def collect_items(
-        self, sec_uid: str, user_info: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+    async def collect_items(self, sec_uid: str, user_info: Dict[str, Any]) -> List[Dict[str, Any]]:
         return await self._collect_paged_aweme(sec_uid, user_info)
 
     def apply_filters(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -72,9 +70,7 @@ class BaseUserModeStrategy(ABC):
         max_cursor = 0
         has_more = True
 
-        number_limit = int(
-            self.downloader.config.get("number", {}).get(self.mode_name, 0) or 0
-        )
+        number_limit = int(self.downloader.config.get("number", {}).get(self.mode_name, 0) or 0)
         increase_enabled = bool(
             self.downloader.config.get("increase", {}).get(self.mode_name, False)
         )
@@ -111,9 +107,7 @@ class BaseUserModeStrategy(ABC):
                 if len(new_items) < len(page_items):
                     break
             elif increase_enabled and latest_time:
-                new_items = [
-                    a for a in page_items if a.get("create_time", 0) > latest_time
-                ]
+                new_items = [a for a in page_items if a.get("create_time", 0) > latest_time]
                 aweme_list.extend(new_items)
                 if len(new_items) < len(page_items):
                     break
@@ -276,7 +270,9 @@ class BaseUserModeStrategy(ABC):
                 except Exception as exc:
                     logger.warning(
                         "Expansion fetch failed for %s=%s: %s",
-                        id_field, entry_id, exc,
+                        id_field,
+                        entry_id,
+                        exc,
                     )
                     break
                 page = self._normalize_page_data(page_data)

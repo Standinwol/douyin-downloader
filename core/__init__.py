@@ -5,9 +5,9 @@ from .music_downloader import MusicDownloader
 from .url_parser import URLParser
 
 __all__ = [
-    'DouyinAPIClient',
-    'URLParser',
-    'DownloaderFactory',
-    'MixDownloader',
-    'MusicDownloader',
+    "DouyinAPIClient",
+    "URLParser",
+    "DownloaderFactory",
+    "MixDownloader",
+    "MusicDownloader",
 ]
